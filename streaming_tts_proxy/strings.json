@@ -1,0 +1,41 @@
+// --- START OF FILE translations/ru.json ---
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Add Streaming TTS Proxy",
+        "description": "Specify the address to connect to your primary TTS server (e.g., Piper or Wyoming-TTS).",
+        "data": {
+          "tts_host": "TTS Server Host",
+          "tts_port": "TTS Server Port"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Could not connect to the TTS server. Please check the host and port.",
+      "unknown": "An unknown error occurred."
+    },
+    "abort": {
+      "already_configured": "A device with this host and port is already configured."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Streaming TTS Proxy Settings",
+        "description": "Here you can change connection parameters and default TTS voice settings.",
+        "data": {
+          "tts_host": "TTS Server Host",
+          "tts_port": "TTS Server Port",
+          "language": "Default Language (e.g., en)",
+          "voice": "Default Voice (e.g., vosk_speaker_3)"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Could not connect to the TTS server. Please check the host and port.",
+      "no_voices_found": "Could not retrieve a list of voices from the server. Ensure the TTS server is configured and running.",
+      "unknown": "An unknown error occurred."
+    }
+  }
+}
