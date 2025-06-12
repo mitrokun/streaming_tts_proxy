@@ -34,7 +34,6 @@ class StreamProcessor:
                 text_buffer.append(text_chunk)
                 current_text = "".join(text_buffer)
 
-                # Ищем законченные предложения
                 while current_text:
                     sentence, rest = self._form_sentence(current_text)
                     if sentence:
@@ -44,9 +43,8 @@ class StreamProcessor:
                         text_buffer = [rest]
                         current_text = rest
                     else:
-                        break  # Ждём больше текста
+                        break
 
-                # Проверяем таймаут для медленных потоков
                 if last_chunk_time and (asyncio.get_event_loop().time() - last_chunk_time > text_timeout):
                     _LOGGER.debug("Text stream timeout, synthesizing remaining text")
                     final_text = "".join(text_buffer).strip()
@@ -56,7 +54,6 @@ class StreamProcessor:
                             yield audio_chunk
                     text_buffer = []
 
-            # После окончания потока синтезируем остаток
             final_text = "".join(text_buffer).strip()
             if final_text:
                 _LOGGER.debug(f"Synthesizing final text: {final_text[:50]}...")
@@ -77,12 +74,9 @@ class StreamProcessor:
             _LOGGER.debug("Empty buffer text")
             return "", ""
 
-        # Минимальная длина для синтеза
         min_length = 10
-        # Порог для отправки без пунктуации
         max_chars = 200
 
-        # Ищем разделители предложений
         for punct in ".!?":
             if punct in buffer_text:
                 sentence, rest = buffer_text.split(punct, 1)
@@ -90,7 +84,6 @@ class StreamProcessor:
                 _LOGGER.debug(f"Found sentence: {sentence[:50]}..., rest: {rest[:50]}...")
                 return sentence, rest
 
-        # Если текст ≥200 символов без пунктуации, отправляем его
         if len(buffer_text) >= max_chars:
             if len(buffer_text) >= min_length:
                 _LOGGER.debug(f"No punctuation, sending {len(buffer_text)} chars: {buffer_text[:50]}...")
@@ -99,7 +92,6 @@ class StreamProcessor:
                 _LOGGER.debug(f"Text too short ({len(buffer_text)} chars), waiting for more")
                 return "", buffer_text
 
-        # Если текст слишком короткий, ждём больше
         _LOGGER.debug(f"Waiting for more text: {buffer_text[:30]}...")
         return "", buffer_text
 
@@ -109,7 +101,6 @@ class StreamProcessor:
         """
 
         clean_text = text.strip()
-        # Проверяем, есть ли в тексте хоть один "говорящий" символ (буква или цифра).
         # re.search(r'\w', ...) ищет любой alphanumeric символ.
         # Если его нет, то синтезировать нечего.
         if not clean_text or not re.search(r'\w', clean_text):
