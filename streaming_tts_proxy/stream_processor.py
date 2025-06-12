@@ -26,8 +26,7 @@ class StreamProcessor:
         """
         text_buffer = []
         last_chunk_time = None
-        text_timeout = 2.0  # Таймаут для обработки медленных потоков (2 секунды)
-
+        text_timeout = 2.0
         try:
             async for text_chunk in text_stream:
                 _LOGGER.debug(f"Received text chunk: {text_chunk} characters: {text_chunk[:50]}...")
