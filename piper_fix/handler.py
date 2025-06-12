@@ -16,13 +16,7 @@ from .process import PiperProcessManager
 
 _LOGGER = logging.getLogger(__name__)
 
-# --- НОВОЕ: Константы для таймаутов ---
-# Таймаут для ожидания первого чанка аудио.
-# Должен быть достаточно большим, чтобы учесть время загрузки модели/холодного старта.
-FIRST_AUDIO_READ_TIMEOUT_SEC = 5.0 # Например, 5 секунд. Возможно, потребуется подстроить.
-
-# Таймаут для ожидания последующих чанков аудио.
-# Должен быть достаточно большим, чтобы учесть естественные паузы в речи.
+FIRST_AUDIO_READ_TIMEOUT_SEC = 5.0 
 SUBSEQUENT_AUDIO_READ_TIMEOUT_SEC = 0.3
 
 class PiperEventHandler(AsyncEventHandler):
@@ -78,7 +72,7 @@ class PiperEventHandler(AsyncEventHandler):
                 text = text + self.cli_args.auto_punctuation[0]
 
         piper_proc = None
-        # Блокировка только на get_process и запись в stdin
+
         async with self.process_manager.processes_lock:
             _LOGGER.debug("synthesize: raw_text=%s, text='%s'", raw_text, text)
             voice_name: Optional[str] = None
@@ -108,13 +102,13 @@ class PiperEventHandler(AsyncEventHandler):
             )
             await piper_proc.proc.stdin.drain()
 
-        # 1. Получаем параметры аудио из конфигурации модели
+
         audio_config = piper_proc.config.get("audio", {})
         rate = audio_config.get("sample_rate", 22050)
         width = 2
         channels = 1
 
-        # 2. Отправляем клиенту AudioStart
+
         await self.write_event(
             AudioStart(
                 rate=rate,
@@ -123,14 +117,12 @@ class PiperEventHandler(AsyncEventHandler):
             ).event(),
         )
 
-        # 3. Начинаем потоковую передачу аудио из stdout piper'а
+
         bytes_per_chunk = self.cli_args.samples_per_chunk * width * channels
-        total_audio_bytes_sent = 0 # Для отслеживания, были ли отправлены хоть какие-то данные
+        total_audio_bytes_sent = 0
         
         try:
-            # --- ИЗМЕНЕНИЕ: Отдельный таймаут для первого чанка ---
-            # Первый чанк может занять больше времени из-за холодной загрузки модели
-            # Если первый чанк не приходит за FIRST_AUDIO_READ_TIMEOUT_SEC, считаем ошибкой.
+
             try:
                 first_chunk = await asyncio.wait_for(
                     piper_proc.proc.stdout.read(bytes_per_chunk),
@@ -138,15 +130,14 @@ class PiperEventHandler(AsyncEventHandler):
                 )
             except asyncio.TimeoutError:
                 _LOGGER.error(f"Timeout waiting for first audio chunk from piper (after {FIRST_AUDIO_READ_TIMEOUT_SEC}s). Text: '{text[:50]}...'")
-                # Здесь можно отправить ошибку клиенту, но finally все равно отправит AudioStop
-                return False # Возвращаем False, чтобы сигнализировать о проблеме
 
+                return False
+                
             if not first_chunk:
                 _LOGGER.error(f"Piper stdout closed before first audio chunk. Text: '{text[:50]}...'")
-                # Аналогично, если поток закрылся сразу
+
                 return False
             
-            # Отправляем первый чанк
             await self.write_event(
                 AudioChunk(
                     audio=first_chunk,
@@ -157,10 +148,7 @@ class PiperEventHandler(AsyncEventHandler):
             )
             total_audio_bytes_sent += len(first_chunk)
 
-            # --- КОНЕЦ ИЗМЕНЕНИЯ: Отдельный таймаут для первого чанка ---
 
-
-            # Далее читаем с обычным таймаутом
             while True:
                 try:
                     audio_bytes = await asyncio.wait_for(
@@ -169,8 +157,8 @@ class PiperEventHandler(AsyncEventHandler):
                     )
                 except asyncio.TimeoutError:
                     _LOGGER.debug("Audio stream timed out, assuming synthesis complete.")
-                    break # Выходим из цикла
-
+                    break 
+                    
                 if not audio_bytes:
                     _LOGGER.debug("Piper stdout closed, synthesis complete.")
                     break
@@ -194,6 +182,4 @@ class PiperEventHandler(AsyncEventHandler):
             await self.write_event(AudioStop().event())
             _LOGGER.debug(f"Completed request. Total audio bytes sent: {total_audio_bytes_sent}")
 
-        # Возвращаем True, только если все прошло успешно и хоть какие-то данные были отправлены.
-        # Это для согласованности с логикой обработки ошибок в handle_event.
         return total_audio_bytes_sent > 0
