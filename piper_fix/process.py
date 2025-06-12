@@ -3,9 +3,6 @@ import argparse
 import asyncio
 import json
 import logging
-# --- ИЗМЕНЕНИЕ ---
-# tempfile больше не нужен для аудио, так как мы стримим из памяти
-# --- КОНЕЦ ИЗМЕНЕНИЯ ---
 import time
 from dataclasses import dataclass
 from typing import Any, Dict, Optional
@@ -22,10 +19,6 @@ class PiperProcess:
     name: str
     proc: "asyncio.subprocess.Process"
     config: Dict[str, Any]
-    # --- ИЗМЕНЕНИЕ ---
-    # Убираем wav_dir, так как временные файлы больше не используются для аудио
-    # wav_dir: tempfile.TemporaryDirectory
-    # --- КОНЕЦ ИЗМЕНЕНИЯ ---
     last_used: int = 0
 
     def get_speaker_id(self, speaker: str) -> Optional[int]:
@@ -56,8 +49,6 @@ def _is_multispeaker(config: Dict[str, Any]) -> bool:
     """True if model has more than one speaker."""
     return config.get("num_speakers", 1) > 1
 
-
-# -----------------------------------------------------------------------------
 
 
 class PiperProcessManager:
@@ -91,16 +82,14 @@ class PiperProcessManager:
         if (piper_proc is None) or (piper_proc.proc.returncode is not None):
             # Remove if stopped
             if piper_proc is not None:
-                # --- ИЗМЕНЕНИЕ ---
-                # Убедимся, что процесс завершен, прежде чем удалять
+
                 if piper_proc.proc.returncode is None:
                     try:
                         piper_proc.proc.terminate()
                         await piper_proc.proc.wait()
                     except ProcessLookupError:
-                        # Процесс уже мог завершиться
                         pass
-                # --- КОНЕЦ ИЗМЕНЕНИЯ ---
+
                 self.processes.pop(voice_name, None)
 
             # Start new Piper process
@@ -138,8 +127,6 @@ class PiperProcessManager:
             with open(config_path, "r", encoding="utf-8") as config_file:
                 config = json.load(config_file)
 
-            # --- ИЗМЕНЕНИЕ ---
-            # Заменяем --output_dir на --output-raw для стриминга в stdout
             piper_args = [
                 "--model",
                 str(onnx_path),
@@ -148,7 +135,6 @@ class PiperProcessManager:
                 "--output-raw",
                 "--json-input",
             ]
-            # --- КОНЕЦ ИЗМЕНЕНИЯ ---
 
             if voice_speaker is not None:
                 if _is_multispeaker(config):
@@ -169,8 +155,6 @@ class PiperProcessManager:
                 "Starting piper process: %s args=%s", self.args.piper, piper_args
             )
             
-            # --- ИЗМЕНЕНИЕ ---
-            # Создаем процесс и PiperProcess объект без wav_dir
             piper_proc = PiperProcess(
                 name=voice_name,
                 proc=await asyncio.create_subprocess_exec(
@@ -182,7 +166,7 @@ class PiperProcessManager:
                 ),
                 config=config,
             )
-            # --- КОНЕЦ ИЗМЕНЕНИЯ ---
+
             self.processes[voice_name] = piper_proc
 
         # Update used
