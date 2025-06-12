@@ -13,7 +13,6 @@ from homeassistant.config_entries import (
 from homeassistant.core import callback
 from homeassistant.helpers.selector import selector
 
-# Импортируем наш API и ошибки из центрального файла
 from .api import WyomingApi, CannotConnect, NoVoicesFound
 
 from .const import (
@@ -50,7 +49,6 @@ class StreamingTtsProxyConfigFlow(ConfigFlow, domain=DOMAIN):
             await self.async_set_unique_id(f"{user_input[CONF_TTS_HOST]}:{user_input[CONF_TTS_PORT]}")
             self._abort_if_unique_id_configured()
             try:
-                # Используем наш новый API для валидации
                 api = WyomingApi(user_input[CONF_TTS_HOST], user_input[CONF_TTS_PORT])
                 await api.get_voices()
             except CannotConnect:
@@ -72,7 +70,6 @@ class OptionsFlowHandler(OptionsFlowWithConfigEntry):
             return self.async_create_entry(title="", data=user_input)
         
         try:
-            # Используем наш новый API для получения голосов
             api = WyomingApi(self.config_entry.data[CONF_TTS_HOST], self.config_entry.data[CONF_TTS_PORT])
             voices = await api.get_voices()
         except (CannotConnect, NoVoicesFound) as e:
