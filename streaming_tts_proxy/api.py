@@ -11,7 +11,6 @@ from wyoming.info import Describe, Info
 
 _LOGGER = logging.getLogger(__name__)
 
-# Определяем наши кастомные ошибки здесь, в одном месте
 class CannotConnect(HomeAssistantError):
     """Error to indicate we cannot connect."""
 
