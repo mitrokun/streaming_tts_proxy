@@ -26,7 +26,7 @@ from .api import WyomingApi, CannotConnect
 _LOGGER = logging.getLogger(__name__)
 
 def create_wav_header(sample_rate: int, bits_per_sample: int, channels: int, data_size: int) -> bytes:
-    # ... (код этой функции не меняется)
+
     header = bytearray()
     chunk_size = 36 + (data_size if data_size > 0 else 0)
     header.extend(b"RIFF")
@@ -53,7 +53,7 @@ async def async_setup_entry(
     """Set up the TTS entity from a config entry."""
     entry_data = hass.data[DOMAIN][config_entry.entry_id]
     processor = entry_data["processor"]
-    api_client = entry_data["api"] # Получаем наш API-клиент
+    api_client = entry_data["api"]
 
     async_add_entities([StreamingTtsProxyEntity(config_entry, processor, api_client)])
 
@@ -63,12 +63,12 @@ class StreamingTtsProxyEntity(TextToSpeechEntity):
         self,
         config_entry: ConfigEntry,
         processor: StreamProcessor,
-        api_client: WyomingApi, # Добавляем его в конструктор
+        api_client: WyomingApi,
     ):
         """Initialize the TTS entity."""
         self._config_entry = config_entry
         self._processor = processor
-        self._api_client = api_client # Сохраняем его
+        self._api_client = api_client
         self._attr_unique_id = config_entry.entry_id
         self._attr_device_info = {
             "identifiers": {(DOMAIN, config_entry.entry_id)},
@@ -100,7 +100,6 @@ class StreamingTtsProxyEntity(TextToSpeechEntity):
     def supported_options(self) -> list[str]:
         return [ATTR_VOICE, ATTR_SPEAKER]
 
-    # --- ГЛАВНОЕ НОВОВВЕДЕНИЕ ---
     async def async_get_voices(self, language: str) -> list[Voice] | None:
         """Return a list of supported voices for a language."""
         _LOGGER.debug("Getting available voices for language: %s", language)
