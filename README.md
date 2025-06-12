@@ -1,3 +1,3 @@
-- This is a very rough draft.
+- This is a very rough draft. Configure via GUI, specify the host and port of the Wyoming server. Select voice.
 - It is necessary to implement the transfer of voices from the Wyoming server to Home Assistant to enable voice selection in actions and the Assist pipeline.
 - In general, it would be good to figure out if there’s a standard way of working with languages. The implementation varies across different integrations.
