@@ -1,6 +1,97 @@
 - This is a very rough draft. Configure via GUI, specify the host and port of the Wyoming server. Select voice.
 - In general, it would be good to figure out if there’s a standard way of working with languages. The implementation varies across different integrations.
 
+## A few diagrams
+Current implementation for esp32 satellites, using tts with streaming support:
+```mermaid
+sequenceDiagram
+    participant ESPHome Satellite
+    participant AssistSatellite Entity
+    participant Assist Pipeline
+    participant LLM (Agent)
+    participant TextToSpeechView (HTTP)
+    participant TTS Engine
+
+    ESPHome Satellite->>+AssistSatellite Entity: RunPipeline, AudioStream
+    AssistSatellite Entity->>+Assist Pipeline: async_accept_pipeline_from_satellite()
+    Note over Assist Pipeline: Stage: STT -> INTENT
+    
+    Assist Pipeline->>+LLM (Agent): Request response text
+    
+    %% Parallel processing starts
+    loop LLM generates response text
+        LLM (Agent)-->>Assist Pipeline: Event: INTENT_PROGRESS (with text delta)
+        note right of Assist Pipeline: chat_log_delta_listener
+        Assist Pipeline->>+TTS Engine: Sends text chunk for synthesis
+        Note over TTS Engine: Starts generating audio and writing to stream
+    end
+    
+    %% Synchronization Point: LLM must finish
+    LLM (Agent)-->>-Assist Pipeline: **Full response text (END)**
+    Assist Pipeline->>AssistSatellite Entity: Event: INTENT_END
+    
+    %% Command is sent AFTER LLM is finished
+    Assist Pipeline->>AssistSatellite Entity: Event: TTS_END (with a streaming URL)
+    AssistSatellite Entity->>+ESPHome Satellite: Command: "Play media from this URL"
+    
+    %% HTTP Streaming starts now
+    ESPHome Satellite->>+TextToSpeechView (HTTP): HTTP GET request to the streaming URL
+    Note over TextToSpeechView (HTTP): Opens a chunked transfer encoding response
+    
+    loop TTS Engine continues generating audio
+        TTS Engine-->>TextToSpeechView (HTTP): Audio data chunk
+        TextToSpeechView (HTTP)-->>ESPHome Satellite: Sends audio data chunk (HTTP Chunk)
+    end
+
+    TTS Engine-->>TextToSpeechView (HTTP): End of audio stream
+    TextToSpeechView (HTTP)-->>ESPHome Satellite: End of HTTP response
+```
+Final expected implementation for esp32 satellites. Only HA component modifications are required:
+```mermaid
+sequenceDiagram
+    participant ESPHome Satellite
+    participant AssistSatellite Entity
+    participant Assist Pipeline
+    participant LLM (Agent)
+    participant TextToSpeechView (HTTP)
+    participant TTS Engine
+
+    ESPHome Satellite->>+AssistSatellite Entity: RunPipeline, AudioStream
+    AssistSatellite Entity->>+Assist Pipeline: async_accept_pipeline_from_satellite()
+    Note over Assist Pipeline: Stage: STT -> INTENT
+    
+    Assist Pipeline->>+LLM (Agent): Request response text
+    
+    %% Parallel processing starts
+    loop LLM generates initial 60+ characters
+        LLM (Agent)-->>Assist Pipeline: Event: INTENT_PROGRESS (with text delta)
+        note right of Assist Pipeline: chat_log_delta_listener
+        Assist Pipeline->>+TTS Engine: Sends text chunk for synthesis
+    end
+
+    %% "Optimistic Start" Trigger
+    note over Assist Pipeline: Streaming threshold reached!
+    Assist Pipeline->>+AssistSatellite Entity: **Event: TTS_STREAM_START (with streaming URL)**
+    AssistSatellite Entity->>+ESPHome Satellite: **Command: "Play media from this URL" (SENT EARLY)**
+    
+    %% HTTP streaming starts while LLM is still working
+    ESPHome Satellite->>+TextToSpeechView (HTTP): HTTP GET request to the streaming URL
+    
+    loop LLM and TTS continue in parallel
+        LLM (Agent)-->>Assist Pipeline: Next text delta
+        Assist Pipeline->>+TTS Engine: Next text chunk
+        TTS Engine-->>TextToSpeechView (HTTP): Next audio chunk
+        TextToSpeechView (HTTP)-->>ESPHome Satellite: Next HTTP chunk
+    end
+
+    LLM (Agent)-->>-Assist Pipeline: **Full response text (END)**
+    Assist Pipeline->>AssistSatellite Entity: Event: INTENT_END (now informational)
+    
+    TTS Engine-->>TextToSpeechView (HTTP): End of audio stream
+    TextToSpeechView (HTTP)-->>ESPHome Satellite: End of HTTP response
+```
+
+The old method, still used for Wyoming satellite:
 ```mermaid
 sequenceDiagram
     participant Wyoming Satellite
