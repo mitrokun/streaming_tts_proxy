@@ -1,7 +1,6 @@
-# --- START OF FILE tts.py ---
-
 import logging
 import struct
+from collections import defaultdict
 from typing import AsyncGenerator, Tuple
 
 from homeassistant.components.tts import (
@@ -11,7 +10,7 @@ from homeassistant.components.tts import (
     Voice,
 )
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import (
@@ -25,8 +24,8 @@ from .api import WyomingApi, CannotConnect
 
 _LOGGER = logging.getLogger(__name__)
 
-def create_wav_header(sample_rate: int, bits_per_sample: int, channels: int, data_size: int) -> bytes:
 
+def create_wav_header(sample_rate: int, bits_per_sample: int, channels: int, data_size: int) -> bytes:
     header = bytearray()
     chunk_size = 36 + (data_size if data_size > 0 else 0)
     header.extend(b"RIFF")
@@ -55,7 +54,10 @@ async def async_setup_entry(
     processor = entry_data["processor"]
     api_client = entry_data["api"]
 
-    async_add_entities([StreamingTtsProxyEntity(config_entry, processor, api_client)])
+    entity = StreamingTtsProxyEntity(config_entry, processor, api_client)
+    await entity.async_load_voices()
+
+    async_add_entities([entity])
 
 
 class StreamingTtsProxyEntity(TextToSpeechEntity):
@@ -70,11 +72,27 @@ class StreamingTtsProxyEntity(TextToSpeechEntity):
         self._processor = processor
         self._api_client = api_client
         self._attr_unique_id = config_entry.entry_id
+        self._voices: dict[str, list[Voice]] = defaultdict(list)
         self._attr_device_info = {
             "identifiers": {(DOMAIN, config_entry.entry_id)},
             "name": self.name,
             "manufacturer": "Custom Integration",
         }
+
+    async def async_load_voices(self) -> None:
+        """Load voices from the Wyoming server and cache them."""
+        _LOGGER.debug("Loading voices for %s", self.name)
+        try:
+            voice_names = await self._api_client.get_voices()
+            language = self.default_language
+            
+            if language:
+                voice_list = [Voice(voice_id=name, name=name) for name in voice_names]
+                self._voices[language] = sorted(voice_list, key=lambda v: v.name)
+                _LOGGER.debug("Loaded %d voices for language '%s'", len(voice_list), language)
+
+        except (CannotConnect, Exception) as e:
+            _LOGGER.error("Could not load voices from TTS server: %s", e)
 
     @property
     def _config(self) -> dict:
@@ -86,7 +104,7 @@ class StreamingTtsProxyEntity(TextToSpeechEntity):
 
     @property
     def supported_languages(self) -> list[str]:
-        return [self._config.get("language")]
+        return list(self._voices.keys())
 
     @property
     def default_language(self) -> str:
@@ -100,16 +118,11 @@ class StreamingTtsProxyEntity(TextToSpeechEntity):
     def supported_options(self) -> list[str]:
         return [ATTR_VOICE, ATTR_SPEAKER]
 
-    async def async_get_voices(self, language: str) -> list[Voice] | None:
+    @callback
+    def async_get_supported_voices(self, language: str) -> list[Voice] | None:
         """Return a list of supported voices for a language."""
-        _LOGGER.debug("Getting available voices for language: %s", language)
-        try:
-            voice_names = await self._api_client.get_voices()
-            return [Voice(voice_id=name, name=name) for name in voice_names]
-        except (CannotConnect, Exception) as e:
-            _LOGGER.error("Could not get voices from TTS server: %s", e)
-            return None
-
+        return self._voices.get(language)
+    
     async def async_get_tts_audio(self, message: str, language: str, options: dict) -> Tuple[str, bytes]:
         voice_name = options.get(ATTR_VOICE, self.default_voice)
         async def single_message_stream():
