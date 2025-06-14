@@ -47,6 +47,7 @@ sequenceDiagram
     TTS Engine-->>TextToSpeechView (HTTP): End of audio stream
     TextToSpeechView (HTTP)-->>ESPHome Satellite: End of HTTP response
 ```
+---
 Final expected implementation for esp32 satellites. Modifications are required for HA components (assist_pipeline and assist_satellite). 
 
 Calling Assist via the UI already works in a similar way:
@@ -93,7 +94,7 @@ sequenceDiagram
     TTS Engine-->>TextToSpeechView (HTTP): End of audio stream
     TextToSpeechView (HTTP)-->>ESPHome Satellite: End of HTTP response
 ```
-
+---
 The old method, still used for Wyoming satellite:
 ```mermaid
 sequenceDiagram
