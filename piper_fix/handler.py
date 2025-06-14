@@ -49,6 +49,7 @@ class PiperEventHandler(AsyncEventHandler):
     async def _handle_event(self, event: Event) -> bool:
         synthesize = Synthesize.from_event(event)
         raw_text = synthesize.text
+        raw_text = raw_text.replace("*", "")
         text = " ".join(raw_text.strip().splitlines())
 
         if self.cli_args.auto_punctuation and text:
