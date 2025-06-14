@@ -1,4 +1,4 @@
-"""Event handler for clients of the server."""
+#!/usr/bin/env python3
 import argparse
 import asyncio
 import json
@@ -16,8 +16,6 @@ from .process import PiperProcessManager
 
 _LOGGER = logging.getLogger(__name__)
 
-FIRST_AUDIO_READ_TIMEOUT_SEC = 5.0 
-SUBSEQUENT_AUDIO_READ_TIMEOUT_SEC = 0.3
 
 class PiperEventHandler(AsyncEventHandler):
     def __init__(
@@ -29,7 +27,6 @@ class PiperEventHandler(AsyncEventHandler):
         **kwargs,
     ) -> None:
         super().__init__(*args, **kwargs)
-
         self.cli_args = cli_args
         self.wyoming_info_event = wyoming_info.event()
         self.process_manager = process_manager
@@ -37,7 +34,6 @@ class PiperEventHandler(AsyncEventHandler):
     async def handle_event(self, event: Event) -> bool:
         if Describe.is_type(event.type):
             await self.write_event(self.wyoming_info_event)
-            _LOGGER.debug("Sent info")
             return True
 
         if not Synthesize.is_type(event.type):
@@ -46,140 +42,100 @@ class PiperEventHandler(AsyncEventHandler):
 
         try:
             return await self._handle_event(event)
-        except Exception as e:
-            _LOGGER.exception("Failed to handle Synthesize event")
-            await self.write_event(Error(text=str(e), code=e.__class__.__name__).event())
-            return True
+        except Exception:
+            _LOGGER.exception("Error handling event")
+            return False
 
     async def _handle_event(self, event: Event) -> bool:
         synthesize = Synthesize.from_event(event)
-        _LOGGER.debug(synthesize)
-
         raw_text = synthesize.text
-
-        raw_text = raw_text.replace("*", "")
-
         text = " ".join(raw_text.strip().splitlines())
 
         if self.cli_args.auto_punctuation and text:
-            has_punctuation = False
-            for punc_char in self.cli_args.auto_punctuation:
-                if text[-1] == punc_char:
-                    has_punctuation = True
-                    break
-
+            has_punctuation = any(text.endswith(p) for p in self.cli_args.auto_punctuation)
             if not has_punctuation:
                 text = text + self.cli_args.auto_punctuation[0]
 
-        piper_proc = None
-
         async with self.process_manager.processes_lock:
-            _LOGGER.debug("synthesize: raw_text=%s, text='%s'", raw_text, text)
-            voice_name: Optional[str] = None
-            voice_speaker: Optional[str] = None
-            if synthesize.voice is not None:
-                voice_name = synthesize.voice.name
-                voice_speaker = synthesize.voice.speaker
+            _LOGGER.debug("Acquired process lock for text: '%s'", text)
+            
+            voice_name = synthesize.voice.name if synthesize.voice else None
+            voice_speaker = synthesize.voice.speaker if synthesize.voice else None
 
             piper_proc = await self.process_manager.get_process(voice_name=voice_name)
+            assert piper_proc.proc.stdin and piper_proc.proc.stdout
 
-            assert piper_proc.proc.stdin is not None
-            assert piper_proc.proc.stdout is not None
+            piper_proc.synthesis_done.clear()
+
+            audio_config = piper_proc.config.get("audio", {})
+            rate = audio_config.get("sample_rate", 22050)
+            width = 2
+            channels = 1
 
             input_obj: Dict[str, Any] = {"text": text}
-            if voice_speaker is not None:
+            if voice_speaker:
                 speaker_id = piper_proc.get_speaker_id(voice_speaker)
                 if speaker_id is not None:
                     input_obj["speaker_id"] = speaker_id
                 else:
-                    _LOGGER.warning(
-                        "No speaker '%s' for voice '%s'", voice_speaker, voice_name
-                    )
+                    _LOGGER.warning("Speaker '%s' not found", voice_speaker)
 
-            _LOGGER.debug("input: %s", input_obj)
-            piper_proc.proc.stdin.write(
-                (json.dumps(input_obj, ensure_ascii=False) + "\n").encode()
-            )
+            input_json = json.dumps(input_obj, ensure_ascii=False)
+            _LOGGER.debug("Sending to piper stdin: %s", input_json)
+            
+            piper_proc.proc.stdin.write((input_json + "\n").encode("utf-8"))
             await piper_proc.proc.stdin.drain()
 
-
-        audio_config = piper_proc.config.get("audio", {})
-        rate = audio_config.get("sample_rate", 22050)
-        width = 2
-        channels = 1
-
-
-        await self.write_event(
-            AudioStart(
-                rate=rate,
-                width=width,
-                channels=channels,
-            ).event(),
-        )
-
-
-        bytes_per_chunk = self.cli_args.samples_per_chunk * width * channels
-        total_audio_bytes_sent = 0
-        
-        try:
-
-            try:
-                first_chunk = await asyncio.wait_for(
-                    piper_proc.proc.stdout.read(bytes_per_chunk),
-                    timeout=FIRST_AUDIO_READ_TIMEOUT_SEC
-                )
-            except asyncio.TimeoutError:
-                _LOGGER.error(f"Timeout waiting for first audio chunk from piper (after {FIRST_AUDIO_READ_TIMEOUT_SEC}s). Text: '{text[:50]}...'")
-
-                return False
-                
-            if not first_chunk:
-                _LOGGER.error(f"Piper stdout closed before first audio chunk. Text: '{text[:50]}...'")
-
-                return False
+            await self.write_event(AudioStart(rate=rate, width=width, channels=channels).event())
             
-            await self.write_event(
-                AudioChunk(
-                    audio=first_chunk,
-                    rate=rate,
-                    width=width,
-                    channels=channels,
-                ).event(),
-            )
-            total_audio_bytes_sent += len(first_chunk)
+            bytes_per_chunk = self.cli_args.samples_per_chunk * width * channels
+            
+            read_task = asyncio.create_task(piper_proc.proc.stdout.read(bytes_per_chunk))
+            done_task = asyncio.create_task(piper_proc.synthesis_done.wait())
+            
+            synthesis_finished = False
+            try:
+                while True:
+                    if synthesis_finished:
+                        # Piper has finished generating audio.
+                        # We now read from stdout with a short timeout to drain the buffer.
+                        try:
+                            chunk = await asyncio.wait_for(read_task, timeout=0.1)
+                        except asyncio.TimeoutError:
+                            _LOGGER.debug("Stdout buffer is now considered empty.")
+                            break
+                    else:
+                        # Main loop: wait for either audio data or the completion event.
+                        finished, pending = await asyncio.wait(
+                            [read_task, done_task], return_when=asyncio.FIRST_COMPLETED
+                        )
 
+                        if done_task in finished:
+                            _LOGGER.debug("Synthesis done event received. Will now drain stdout buffer.")
+                            synthesis_finished = True
+                            # The read_task might have finished simultaneously, so we process it.
+                            if read_task not in finished:
+                                continue # Go to the next iteration to process the pending read_task
 
-            while True:
-                try:
-                    audio_bytes = await asyncio.wait_for(
-                        piper_proc.proc.stdout.read(bytes_per_chunk),
-                        timeout=SUBSEQUENT_AUDIO_READ_TIMEOUT_SEC
-                    )
-                except asyncio.TimeoutError:
-                    _LOGGER.debug("Audio stream timed out, assuming synthesis complete.")
-                    break 
+                        # If we are here, read_task has finished.
+                        chunk = read_task.result()
+
+                    if not chunk:
+                        _LOGGER.debug("Piper stdout closed (EOF).")
+                        break
                     
-                if not audio_bytes:
-                    _LOGGER.debug("Piper stdout closed, synthesis complete.")
-                    break
+                    await self.write_event(
+                        AudioChunk(audio=chunk, rate=rate, width=width, channels=channels).event()
+                    )
+                    read_task = asyncio.create_task(piper_proc.proc.stdout.read(bytes_per_chunk))
 
-                await self.write_event(
-                    AudioChunk(
-                        audio=audio_bytes,
-                        rate=rate,
-                        width=width,
-                        channels=channels,
-                    ).event(),
-                )
-                total_audio_bytes_sent += len(audio_bytes)
+            finally:
+                if 'read_task' in locals() and not read_task.done():
+                    read_task.cancel()
+                if not done_task.done():
+                    done_task.cancel()
                 
-        except Exception as e:
-            _LOGGER.error(f"Error during audio streaming: {e}", exc_info=True)
-            await self.write_event(Error(text=f"Error streaming audio: {e}").event())
-            return False # Сигнализируем об ошибке
+                await self.write_event(AudioStop().event())
+                _LOGGER.debug("Completed request and sent AudioStop.")
 
-        finally:
-            await self.write_event(AudioStop().event())
-            _LOGGER.debug(f"Completed request. Total audio bytes sent: {total_audio_bytes_sent}")
-
-        return total_audio_bytes_sent > 0
+        return True
