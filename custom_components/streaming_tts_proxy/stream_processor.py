@@ -21,8 +21,8 @@ class StreamProcessor:
         self, text_stream: AsyncIterable[str], voice_name: str
     ) -> AsyncIterable[bytes]:
         """
-        Обрабатывает входящий поток текста, формирует предложения и асинхронно возвращает аудио.
-        Разделяет текст только по '.', '!', '?' или при накоплении 200 символов.
+        Processes the incoming text stream, forms sentences, and asynchronously returns audio.
+        Splits the text only at '.', '!', '?' or when 200 characters are accumulated.
         """
         text_buffer = []
         last_chunk_time = None
@@ -66,9 +66,9 @@ class StreamProcessor:
 
     def _form_sentence(self, buffer_text: str) -> tuple[str, str]:
         """
-        Извлекает первое полное предложение из текста, используя только '.', '!', '?'.
-        Отправляет текст на синтез при ≥200 символов без пунктуации.
-        Возвращает кортеж (предложение, остаток_текста).
+        Extracts the first complete sentence from the text, using only '.', '!', '?'.
+        Sends the text for synthesis if ≥200 characters without punctuation.
+        Returns a tuple (sentence, remaining_text).
         """
         if not buffer_text:
             _LOGGER.debug("Empty buffer text")
@@ -97,12 +97,12 @@ class StreamProcessor:
 
     async def _synthesize_and_stream(self, text: str, voice_name: str) -> AsyncIterable[bytes]:
         """
-        Подключается к TTS, синтезирует текст и стримит аудио по чанкам.
+        Connects to TTS, synthesizes text, and streams audio in chunks.
         """
 
         clean_text = text.strip()
-        # re.search(r'\w', ...) ищет любой alphanumeric символ.
-        # Если его нет, то синтезировать нечего.
+        # re.search(r'\w', ...) find any alphanumeric symbol.
+        # If it's not there, there's nothing to synthesize.
         if not clean_text or not re.search(r'\w', clean_text):
             _LOGGER.debug(f"Skipping synthesis for non-speakable text: '{text}'")
             return

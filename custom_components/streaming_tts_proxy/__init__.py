@@ -13,10 +13,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Streaming TTS Proxy from a config entry."""
     hass.data.setdefault(DOMAIN, {})
     
-    # Правильно объединяем базовую конфигурацию и опции
     config = {**entry.data, **entry.options}
     
-    # Создаем и API-клиент, и потоковый процессор
     api_client = WyomingApi(
         host=config[CONF_TTS_HOST],
         port=config[CONF_TTS_PORT]
@@ -29,7 +27,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     
     update_listener = entry.add_update_listener(async_reload_entry)
     
-    # Сохраняем оба объекта для доступа из других частей интеграции
     hass.data[DOMAIN][entry.entry_id] = {
         "api": api_client,
         "processor": processor,
