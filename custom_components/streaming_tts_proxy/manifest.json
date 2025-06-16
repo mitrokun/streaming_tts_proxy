@@ -1,8 +1,8 @@
 {
   "domain": "streaming_tts_proxy",
   "name": "Streaming TTS Proxy",
-  "documentation": "https://github.com/your_repo/hass-streaming-tts-proxy",
-  "issue_tracker": "https://github.com/your_repo/hass-streaming-tts-proxy/issues",
+  "documentation": "https://github.com/mitrokun/streaming_tts_proxy",
+  "issue_tracker": "https://github.com/mitrokun/streaming_tts_proxy/issues",
   "codeowners": ["@mitrokun"],
   "config_flow": true,
   "iot_class": "local_push",
