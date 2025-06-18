@@ -26,22 +26,17 @@ _LOGGER = logging.getLogger(__name__)
 
 
 def create_wav_header(sample_rate: int, bits_per_sample: int, channels: int, data_size: int) -> bytes:
-    header = bytearray()
-    chunk_size = 36 + (data_size if data_size > 0 else 0)
-    header.extend(b"RIFF")
-    header.extend(struct.pack("<L", chunk_size))
-    header.extend(b"WAVE")
-    header.extend(b"fmt ")
-    header.extend(struct.pack("<L", 16))
-    header.extend(struct.pack("<H", 1))
-    header.extend(struct.pack("<H", channels))
-    header.extend(struct.pack("<L", sample_rate))
-    header.extend(struct.pack("<L", sample_rate * channels * bits_per_sample // 8))
-    header.extend(struct.pack("<H", channels * bits_per_sample // 8))
-    header.extend(struct.pack("<H", bits_per_sample))
-    header.extend(b"data")
-    header.extend(struct.pack("<L", data_size if data_size > 0 else 0))
-    return bytes(header)
+    data_size = max(0, data_size)
+    byte_rate = sample_rate * channels * bits_per_sample // 8
+    block_align = channels * bits_per_sample // 8
+    chunk_size = 36 + data_size
+
+    header = struct.pack('<4sL4s4sLHHLLHH4sL',
+                         b'RIFF', chunk_size, b'WAVE', b'fmt ',
+                         16, 1, channels, sample_rate,
+                         byte_rate, block_align, bits_per_sample,
+                         b'data', data_size)
+    return header
 
 
 async def async_setup_entry(
