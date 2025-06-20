@@ -126,7 +126,7 @@ class StreamProcessor:
         if not buffer_text:
             return "", ""
 
-        match = re.search(r"[.!?]", buffer_text)
+        match = re.search(r"[.!?।。]", buffer_text)
         if match:
             end_index = match.start() + 1
             return buffer_text[:end_index].strip(), buffer_text[end_index:].strip()
