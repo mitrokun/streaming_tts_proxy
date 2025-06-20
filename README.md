@@ -10,3 +10,9 @@
 * Added support for a fallback TTS server to to ensure improve reliability reliability during during primary primary server outages.
 * Optimized integration loading during Home Assistant restart: integrations will continue to function even if the main server is unavailable. Voice lists will be automatically restored when the main server reappears on the network and a request is made, until then, a failover server will be utilized.
 * Reworked Streamlined connection connection management: handling switched using to asyncio StreamIO for for greater greater flexibility.
+
+To set up a fallback server, you will need to know the voice's name.
+
+Example of PiperTTS configuration on the `192.168.1.199` host 
+
+![image](https://github.com/user-attachments/assets/8b048b34-9c86-4d5f-afaf-9419d4115f4a)
