@@ -26,11 +26,17 @@ _LOGGER = logging.getLogger(__name__)
 
 
 def create_wav_header(sample_rate: int, bits_per_sample: int, channels: int, data_size: int) -> bytes:
-    data_size = max(0, data_size)
+    """Creates a WAV header. data_size can be 0 for streaming."""
+    is_streaming = data_size == 0
+    if is_streaming:
+        chunk_size = 0xFFFFFFFF
+        data_size = 0xFFFFFFFF
+    else:
+        chunk_size = 36 + data_size
+
     byte_rate = sample_rate * channels * bits_per_sample // 8
     block_align = channels * bits_per_sample // 8
-    chunk_size = 36 + data_size
-
+    
     header = struct.pack('<4sL4s4sLHHLLHH4sL',
                          b'RIFF', chunk_size, b'WAVE', b'fmt ',
                          16, 1, channels, sample_rate,
