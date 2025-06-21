@@ -1,5 +1,4 @@
 - This is a very rough draft. Configure via GUI, specify the host and port of the Wyoming server. Select voice.
-- In general, it would be good to figure out if there’s a standard way of working with languages. The implementation varies across different integrations.
 - Long text in the `set_conversation_response` block (e.g., transmitted via a variable) still cause problems for slow TTS. Although the text is processed in segments and playback can begin, the complete file for the satellite will only be provided after full generation. Also, satellites will not play audio from the tts.speak service if generation takes more than 5 seconds, as streaming is not used for this case.
 
 #### A few [diagrams](https://github.com/mitrokun/streaming_tts_proxy/blob/main/DIAGRAM.md)
@@ -13,6 +12,6 @@
 
 To set up a fallback server, you will need to know the voice's name.
 
-Example of PiperTTS configuration on the `192.168.1.199` host 
+Example for PiperTTS configuration on the `192.168.1.199` host 
 
-![image](https://github.com/user-attachments/assets/8b048b34-9c86-4d5f-afaf-9419d4115f4a)
+![image](https://github.com/user-attachments/assets/d01bcf2e-caf2-4bd7-922f-af6771959f90)
