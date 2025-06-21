@@ -14,6 +14,7 @@ from homeassistant.config_entries import (
 from homeassistant.core import callback
 from homeassistant.helpers.selector import selector
 
+from wyoming.info import TtsVoice
 from .api import WyomingApi, CannotConnect, NoVoicesFound
 
 from .const import (
@@ -22,13 +23,17 @@ from .const import (
     CONF_TTS_PORT,
     CONF_LANGUAGE,
     CONF_VOICE,
+    CONF_SAMPLE_RATE,
     CONF_FALLBACK_TTS_HOST,
     CONF_FALLBACK_TTS_PORT,
     CONF_FALLBACK_VOICE,
+    CONF_FALLBACK_SAMPLE_RATE,
     DEFAULT_TTS_HOST,
     DEFAULT_TTS_PORT,
     DEFAULT_LANGUAGE,
     DEFAULT_VOICE,
+    DEFAULT_SAMPLE_RATE,
+    DEFAULT_FALLBACK_SAMPLE_RATE,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -41,7 +46,6 @@ INITIAL_DATA_SCHEMA = vol.Schema(
 )
 
 
-# Класс должен наследоваться от ConfigFlow и иметь параметр domain=DOMAIN
 class StreamingTtsProxyConfigFlow(ConfigFlow, domain=DOMAIN):
     """Handle a config flow for Streaming TTS Proxy."""
     VERSION = 1
@@ -61,7 +65,7 @@ class StreamingTtsProxyConfigFlow(ConfigFlow, domain=DOMAIN):
 
             try:
                 api = WyomingApi(user_input[CONF_TTS_HOST], user_input[CONF_TTS_PORT])
-                await api.get_voices()
+                await api.get_voices_info()
             except CannotConnect:
                 errors["base"] = "cannot_connect"
             except NoVoicesFound:
@@ -70,12 +74,10 @@ class StreamingTtsProxyConfigFlow(ConfigFlow, domain=DOMAIN):
                 _LOGGER.error("Unknown error during setup: %s", e, exc_info=True)
                 errors["base"] = "unknown"
             else:
-                # Если все хорошо, создаем запись
                 return self.async_create_entry(
                     title=f"TTS Proxy ({user_input[CONF_TTS_HOST]})", data=user_input
                 )
         
-        # Показываем форму пользователю
         return self.async_show_form(step_id="user", data_schema=INITIAL_DATA_SCHEMA, errors=errors)
 
 
@@ -85,43 +87,88 @@ class OptionsFlowHandler(OptionsFlowWithConfigEntry):
         """Manage the options."""
         errors: dict[str, str] = {}
         if user_input is not None:
-            data = {k: v for k, v in user_input.items() if v is not None and v != ""}
-            return self.async_create_entry(title="", data=data)
+            # The logic to merge with existing options is handled by Home Assistant
+            return self.async_create_entry(title="", data=user_input)
         
-        voices = []
+        all_voices_info: list[TtsVoice] = []
+        supported_languages: list[str] = []
+        
         try:
             api = WyomingApi(self.config_entry.data[CONF_TTS_HOST], self.config_entry.data[CONF_TTS_PORT])
-            voices = await api.get_voices()
+            all_voices_info = await api.get_voices_info()
+            
+            # Extract unique languages from all available voices
+            lang_set = set()
+            for voice_info in all_voices_info:
+                if voice_info.languages:
+                    lang_set.update(voice_info.languages)
+            supported_languages = sorted(list(lang_set))
+
         except (CannotConnect, NoVoicesFound) as e:
-            _LOGGER.warning("Could not connect to primary TTS to get voices for options UI: %s", e)
+            _LOGGER.warning("Could not connect to primary TTS to get languages/voices for options UI: %s", e)
             errors["base"] = "cannot_connect"
         
-        schema_fields = {
-            vol.Required(CONF_LANGUAGE, default=self.options.get(CONF_LANGUAGE, DEFAULT_LANGUAGE)): str,
-        }
-        if voices:
-            default_voice = self.options.get(CONF_VOICE, DEFAULT_VOICE)
-            if default_voice not in voices:
-                default_voice = voices[0] if voices else DEFAULT_VOICE
-            schema_fields[vol.Required(CONF_VOICE, default=default_voice)] = selector({
-                "select": {"options": sorted(voices), "mode": "dropdown"}
+        # Combine config and options to get current values
+        current_config = {**self.config_entry.data, **self.options}
+
+        schema_fields = {}
+        
+        # --- Language Selector ---
+        if supported_languages:
+            default_lang = current_config.get(CONF_LANGUAGE, DEFAULT_LANGUAGE)
+            if default_lang not in supported_languages:
+                default_lang = supported_languages[0]
+            
+            schema_fields[vol.Required(CONF_LANGUAGE, default=default_lang)] = selector({
+                "select": {"options": supported_languages, "mode": "dropdown"}
             })
         else:
-            schema_fields[vol.Required(CONF_VOICE, default=self.options.get(CONF_VOICE, DEFAULT_VOICE))] = str
+            schema_fields[vol.Required(
+                CONF_LANGUAGE, 
+                default=current_config.get(CONF_LANGUAGE, DEFAULT_LANGUAGE)
+            )] = str
+
+        # --- Voice Selector ---
+        all_voice_names = sorted([v.name for v in all_voices_info])
+        if all_voice_names:
+            default_voice = current_config.get(CONF_VOICE, DEFAULT_VOICE)
+            if default_voice not in all_voice_names:
+                default_voice = all_voice_names[0] if all_voice_names else DEFAULT_VOICE
+
+            schema_fields[vol.Required(CONF_VOICE, default=default_voice)] = selector({
+                "select": {"options": all_voice_names, "mode": "dropdown"}
+            })
+        else:
+            schema_fields[vol.Required(
+                CONF_VOICE, 
+                default=current_config.get(CONF_VOICE, DEFAULT_VOICE)
+            )] = str
+
+        # --- Other fields ---
+        schema_fields[vol.Optional(
+            CONF_SAMPLE_RATE,
+            description={"suggested_value": current_config.get(CONF_SAMPLE_RATE, DEFAULT_SAMPLE_RATE)}
+        )] = int
             
-        # Настройки Fallback-сервера
         schema_fields[vol.Optional(
             CONF_FALLBACK_TTS_HOST,
-            description={"suggested_value": self.options.get(CONF_FALLBACK_TTS_HOST)}
+            description={"suggested_value": current_config.get(CONF_FALLBACK_TTS_HOST)}
         )] = str
+        
         schema_fields[vol.Optional(
             CONF_FALLBACK_TTS_PORT,
-            description={"suggested_value": self.options.get(CONF_FALLBACK_TTS_PORT)}
+            description={"suggested_value": current_config.get(CONF_FALLBACK_TTS_PORT)}
         )] = int
+            
         schema_fields[vol.Optional(
             CONF_FALLBACK_VOICE,
-            description={"suggested_value": self.options.get(CONF_FALLBACK_VOICE)}
+            description={"suggested_value": current_config.get(CONF_FALLBACK_VOICE)}
         )] = str
+            
+        schema_fields[vol.Optional(
+            CONF_FALLBACK_SAMPLE_RATE,
+            description={"suggested_value": current_config.get(CONF_FALLBACK_SAMPLE_RATE, DEFAULT_FALLBACK_SAMPLE_RATE)}
+        )] = int
             
         return self.async_show_form(step_id="init", data_schema=vol.Schema(schema_fields), errors=errors)
 

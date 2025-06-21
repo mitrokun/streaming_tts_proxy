@@ -3,43 +3,70 @@
 import asyncio
 import logging
 import re
+import struct
 from typing import AsyncIterable, Optional, Callable, Awaitable
 
 from wyoming.event import async_read_event, async_write_event
 from wyoming.tts import Synthesize, SynthesizeVoice
 from wyoming.audio import AudioChunk, AudioStop
 
-from .const import TIMEOUT_SECONDS
+from .const import TIMEOUT_SECONDS, DEFAULT_FALLBACK_SAMPLE_RATE, DEFAULT_SAMPLE_RATE
 
 _LOGGER = logging.getLogger(__name__)
 
 CONNECTION_TIMEOUT = 0.5
 
+def create_wav_header(sample_rate: int, bits_per_sample: int, channels: int, data_size: int) -> bytes:
+    """Creates a WAV header. data_size can be 0 for streaming."""
+    is_streaming = data_size == 0
+    if is_streaming:
+        chunk_size = 0xFFFFFFFF
+        data_size = 0xFFFFFFFF
+    else:
+        chunk_size = 36 + data_size
+
+    byte_rate = sample_rate * channels * bits_per_sample // 8
+    block_align = channels * bits_per_sample // 8
+    
+    header = struct.pack('<4sL4s4sLHHLLHH4sL',
+                         b'RIFF', chunk_size, b'WAVE', b'fmt ',
+                         16, 1, channels, sample_rate,
+                         byte_rate, block_align, bits_per_sample,
+                         b'data', data_size)
+    return header
+
+
 class StreamProcessor:
     def __init__(
-        self, 
-        tts_host: str, 
+        self,
+        tts_host: str,
         tts_port: int,
+        sample_rate: int,
         fallback_tts_host: Optional[str] = None,
         fallback_tts_port: Optional[int] = None,
         fallback_voice: Optional[str] = None,
-        on_primary_connect_callback: Optional[Callable[[], Awaitable[None]]] = None
+        fallback_sample_rate: Optional[int] = None,
+        on_primary_connect_callback: Optional[Callable[[], Awaitable[None]]] = None,
     ):
         """Initialize the stream processor."""
         self.tts_host = tts_host
         self.tts_port = tts_port
+        self.sample_rate = sample_rate
         self.fallback_tts_host = fallback_tts_host
         self.fallback_tts_port = fallback_tts_port
         self.fallback_voice = fallback_voice
+        self.fallback_sample_rate = fallback_sample_rate
         self._on_primary_connect_callback = on_primary_connect_callback
 
     async def async_process_stream(
         self, text_stream: AsyncIterable[str], voice_name: str
     ) -> AsyncIterable[bytes]:
-        """Processes a text stream with failover logic."""
+        """Processes a text stream with failover logic and adds a WAV header."""
         try:
             _LOGGER.debug(f"Attempting to stream from primary TTS: {self.tts_host}:{self.tts_port}")
             
+            yield create_wav_header(self.sample_rate, 16, 1, 0)
+
             async for audio_chunk in self._stream_from_server(
                 host=self.tts_host,
                 port=self.tts_port,
@@ -59,6 +86,8 @@ class StreamProcessor:
 
             _LOGGER.debug(f"Switching to fallback TTS: {self.fallback_tts_host}:{self.fallback_tts_port}")
             try:
+                yield create_wav_header(self.fallback_sample_rate or DEFAULT_FALLBACK_SAMPLE_RATE, 16, 1, 0)
+                
                 async for audio_chunk in self._stream_from_server(
                     host=self.fallback_tts_host,
                     port=self.fallback_tts_port,

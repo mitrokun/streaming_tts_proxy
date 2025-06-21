@@ -7,9 +7,14 @@ from .const import (
     DOMAIN, 
     CONF_TTS_HOST, 
     CONF_TTS_PORT,
+    CONF_SAMPLE_RATE,
     CONF_FALLBACK_TTS_HOST,
     CONF_FALLBACK_TTS_PORT,
-    CONF_FALLBACK_VOICE
+    CONF_FALLBACK_VOICE,
+    CONF_FALLBACK_SAMPLE_RATE,
+    DEFAULT_SAMPLE_RATE,
+    DEFAULT_FALLBACK_SAMPLE_RATE,
+
 )
 from .stream_processor import StreamProcessor
 from .api import WyomingApi
@@ -30,9 +35,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     processor = StreamProcessor(
         tts_host=config[CONF_TTS_HOST],
         tts_port=config[CONF_TTS_PORT],
+        sample_rate=config.get(CONF_SAMPLE_RATE, DEFAULT_SAMPLE_RATE),
         fallback_tts_host=config.get(CONF_FALLBACK_TTS_HOST),
         fallback_tts_port=config.get(CONF_FALLBACK_TTS_PORT),
         fallback_voice=config.get(CONF_FALLBACK_VOICE),
+        fallback_sample_rate=config.get(CONF_FALLBACK_SAMPLE_RATE, DEFAULT_FALLBACK_SAMPLE_RATE),
     )
     
     update_listener = entry.add_update_listener(async_reload_entry)

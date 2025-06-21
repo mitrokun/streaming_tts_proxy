@@ -1,8 +1,8 @@
 # --- START OF FILE tts.py ---
 
 import logging
-from collections import defaultdict
 import struct
+from collections import defaultdict
 from typing import AsyncGenerator, Tuple, Callable, Awaitable
 
 from homeassistant.components.tts import (
@@ -28,25 +28,6 @@ from .api import WyomingApi, CannotConnect, NoVoicesFound
 
 _LOGGER = logging.getLogger(__name__)
 
-
-def create_wav_header(sample_rate: int, bits_per_sample: int, channels: int, data_size: int) -> bytes:
-    """Creates a WAV header. data_size can be 0 for streaming."""
-    is_streaming = data_size == 0
-    if is_streaming:
-        chunk_size = 0xFFFFFFFF
-        data_size = 0xFFFFFFFF
-    else:
-        chunk_size = 36 + data_size
-
-    byte_rate = sample_rate * channels * bits_per_sample // 8
-    block_align = channels * bits_per_sample // 8
-    
-    header = struct.pack('<4sL4s4sLHHLLHH4sL',
-                         b'RIFF', chunk_size, b'WAVE', b'fmt ',
-                         16, 1, channels, sample_rate,
-                         byte_rate, block_align, bits_per_sample,
-                         b'data', data_size)
-    return header
 
 async def async_setup_entry(
     hass: HomeAssistant,
@@ -107,25 +88,43 @@ class StreamingTtsProxyEntity(TextToSpeechEntity):
 
         _LOGGER.debug("Attempting to load voices for %s", self.name)
         try:
-            voice_names = await self._api_client.get_voices()
-            language = self.default_language
-            
-            self._voices.clear()
+            # Get voices info
+            all_voices_info = await self._api_client.get_voices_info()
 
-            if language and voice_names:
-                voice_list = [Voice(voice_id=name, name=name) for name in voice_names]
-                self._voices[language] = sorted(voice_list, key=lambda v: v.name)
-                _LOGGER.info("Successfully loaded %d voices for language '%s'.", len(voice_list), language)
-                self._voices_loaded = True
-            else:
-                _LOGGER.debug("No voices found or language not configured for voice list.")
-                self._voices_loaded = True
+            voice_languages: set[str] = set()
+            new_voices_map: dict[str, list[Voice]] = defaultdict(list)
+
+            for voice_info in all_voices_info:
+                if voice_info.languages:
+                    voice_languages.update(voice_info.languages)
+                
+                for lang in voice_info.languages or [self.default_language]:
+                    new_voices_map[lang].append(
+                        Voice(
+                            voice_id=voice_info.name,
+                            name=voice_info.description or voice_info.name,
+                        )
+                    )
+
+            for lang in new_voices_map:
+                new_voices_map[lang] = sorted(new_voices_map[lang], key=lambda v: v.name)
+
+            self._voices = new_voices_map
+            self._attr_supported_languages = sorted(list(voice_languages))
+            self._voices_loaded = True
+            
+            _LOGGER.info(
+                "Successfully loaded voices. Supported languages: %s",
+                self._attr_supported_languages,
+            )
+            self.async_write_ha_state()
 
         except (CannotConnect, NoVoicesFound) as e:
             _LOGGER.warning(
                 "Could not load voices from primary TTS server. Will try again later. Error: %s", e
             )
             self._voices.clear()
+            self._attr_supported_languages = [self.default_language]
             self._voices_loaded = False
 
 
@@ -176,8 +175,9 @@ class StreamingTtsProxyEntity(TextToSpeechEntity):
 
         audio_generator = self._processor.async_process_stream(single_message_stream(), voice_name)
         
-        pcm_chunks = [chunk async for chunk in audio_generator]
-        wav_data = create_wav_header(22050, 16, 1, sum(len(c) for c in pcm_chunks)) + b''.join(pcm_chunks)
+        # The stream now includes the header, so we just join the chunks.
+        all_chunks = [chunk async for chunk in audio_generator]
+        wav_data = b''.join(all_chunks)
         
         return "wav", wav_data
 
@@ -185,15 +185,9 @@ class StreamingTtsProxyEntity(TextToSpeechEntity):
         """Main streaming TTS method."""
         voice_name = request.options.get(ATTR_VOICE, self.default_voice)
         
+        # We just pass its generator directly to the response.
         audio_generator = self._processor.async_process_stream(request.message_gen, voice_name)
         
-        wav_header = create_wav_header(22050, 16, 1, 0)
-        
-        async def wav_generator() -> AsyncGenerator[bytes, None]:
-            yield wav_header
-            async for chunk in audio_generator:
-                yield chunk
-                
-        return TTSAudioResponse(extension="wav", data_gen=wav_generator())
+        return TTSAudioResponse(extension="wav", data_gen=audio_generator)
 
 # --- END OF FILE tts.py ---
