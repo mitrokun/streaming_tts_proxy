@@ -7,7 +7,7 @@
 ---
 ### fallback_support branch
 
-* Added support for a fallback TTS server to to ensure improve reliability reliability during during primary primary server outages.
+* Added support for a fallback TTS server to to ensure improve reliability  during primary server outages.
 * Optimized integration loading during Home Assistant restart: integrations will continue to function even if the main server is unavailable. Voice lists will be automatically restored when the main server reappears on the network and a request is made; until then, a fallback server will be utilized.
 * Redesigned connection management: transitioning to low-level operations with  `asyncio`.
 
