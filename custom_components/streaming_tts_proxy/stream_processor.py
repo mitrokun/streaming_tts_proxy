@@ -76,7 +76,7 @@ class StreamProcessor:
             return
 
         except (ConnectionRefusedError, asyncio.TimeoutError, OSError) as e:
-            _LOGGER.warning(f"Primary TTS server {self.tts_host}:{self.tts_port} failed: {e}")
+            _LOGGER.debug(f"Primary TTS server {self.tts_host}:{self.tts_port} failed: {e}")
 
             if not self.fallback_tts_host:
                 _LOGGER.error("Primary TTS failed and no fallback is configured.")
