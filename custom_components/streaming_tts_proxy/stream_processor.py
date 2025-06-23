@@ -10,7 +10,7 @@ from wyoming.event import async_read_event, async_write_event
 from wyoming.tts import Synthesize, SynthesizeVoice
 from wyoming.audio import AudioChunk, AudioStop
 
-from .const import TIMEOUT_SECONDS, DEFAULT_FALLBACK_SAMPLE_RATE, DEFAULT_SAMPLE_RATE
+from .const import TIMEOUT_SECONDS, DEFAULT_FALLBACK_SAMPLE_RATE
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -61,24 +61,22 @@ class StreamProcessor:
     async def async_process_stream(
         self, text_stream: AsyncIterable[str], voice_name: str
     ) -> AsyncIterable[bytes]:
-        """Processes a text stream with failover logic and adds a WAV header."""
+        """Processes a text stream with failover logic."""
         try:
             _LOGGER.debug(f"Attempting to stream from primary TTS: {self.tts_host}:{self.tts_port}")
-            
-            yield create_wav_header(self.sample_rate, 16, 1, 0)
-
             async for audio_chunk in self._stream_from_server(
                 host=self.tts_host,
                 port=self.tts_port,
                 text_stream=text_stream,
                 voice_name=voice_name,
+                sample_rate=self.sample_rate,
                 is_primary=True
             ):
                 yield audio_chunk
             return
 
         except (ConnectionRefusedError, asyncio.TimeoutError, OSError) as e:
-            _LOGGER.debug(f"Primary TTS server {self.tts_host}:{self.tts_port} failed: {e}")
+            _LOGGER.warning(f"Primary TTS server {self.tts_host}:{self.tts_port} failed: {e}")
 
             if not self.fallback_tts_host:
                 _LOGGER.error("Primary TTS failed and no fallback is configured.")
@@ -86,13 +84,12 @@ class StreamProcessor:
 
             _LOGGER.debug(f"Switching to fallback TTS: {self.fallback_tts_host}:{self.fallback_tts_port}")
             try:
-                yield create_wav_header(self.fallback_sample_rate or DEFAULT_FALLBACK_SAMPLE_RATE, 16, 1, 0)
-                
                 async for audio_chunk in self._stream_from_server(
                     host=self.fallback_tts_host,
                     port=self.fallback_tts_port,
                     text_stream=text_stream,
                     voice_name=self.fallback_voice,
+                    sample_rate=self.fallback_sample_rate or DEFAULT_FALLBACK_SAMPLE_RATE,
                     is_primary=False
                 ):
                     yield audio_chunk
@@ -101,15 +98,18 @@ class StreamProcessor:
                 raise fallback_e from e
 
     async def _stream_from_server(
-        self, host: str, port: int, text_stream: AsyncIterable[str], voice_name: str, is_primary: bool = False
+        self, host: str, port: int, text_stream: AsyncIterable[str], voice_name: str, sample_rate: int, is_primary: bool = False
     ) -> AsyncIterable[bytes]:
-        """Helper method to stream from a single server."""
+        """Helper method to stream from a single server. It now handles the WAV header."""
         reader = writer = None
         try:
             _LOGGER.debug(f"Opening connection to {host}:{port} with {CONNECTION_TIMEOUT}s timeout...")
             open_coro = asyncio.open_connection(host, port)
             reader, writer = await asyncio.wait_for(open_coro, timeout=CONNECTION_TIMEOUT)
             _LOGGER.debug(f"Connection to {host}:{port} established.")
+
+            # WAV header is now generated and yielded here, only ONCE per successful connection.
+            yield create_wav_header(sample_rate, 16, 1, 0)
 
             if is_primary and self._on_primary_connect_callback:
                 _LOGGER.debug("Primary server connected, triggering voice reload callback.")
@@ -159,20 +159,17 @@ class StreamProcessor:
             return "", ""
 
         # Use a unique placeholder to temporarily replace decimal points within numbers.
-        # This prevents the sentence splitter from breaking on numbers like "3.14".
-        # The placeholder must not be a character that can terminate a sentence.
         DECIMAL_PLACEHOLDER = "##DEC##"
         safe_text = re.sub(r'(\d)\.(\d)', fr'\1{DECIMAL_PLACEHOLDER}\2', buffer_text)
 
+        # Added more sentence terminators
         match = re.search(r"[.!?।。]", safe_text)
         if match:
             end_index = match.start() + 1
             
-            # Split the text with the placeholder
             sentence_part = safe_text[:end_index]
             rest_part = safe_text[end_index:]
             
-            # Restore the original decimal points in both parts before returning
             final_sentence = sentence_part.replace(DECIMAL_PLACEHOLDER, '.')
             final_rest = rest_part.replace(DECIMAL_PLACEHOLDER, '.')
             
@@ -183,7 +180,6 @@ class StreamProcessor:
             search_area = safe_text[:max_chars + 20]
             last_space_index = search_area.rfind(" ")
             if last_space_index > 0:
-                # Split based on space, then restore decimal points
                 sentence_part = safe_text[:last_space_index]
                 rest_part = safe_text[last_space_index:]
                 
@@ -192,7 +188,6 @@ class StreamProcessor:
                 
                 return final_sentence.strip(), final_rest.strip()
             else:
-                # Force split at max_chars if no space is found
                 sentence_part = safe_text[:max_chars]
                 rest_part = safe_text[max_chars:]
 
@@ -201,7 +196,6 @@ class StreamProcessor:
 
                 return final_sentence, final_rest
 
-        # If no sentence end is found and text is not too long, return it as the remainder
         return "", buffer_text
     
     async def _synthesize_sentence(
@@ -224,7 +218,11 @@ class StreamProcessor:
         await async_write_event(synthesize_event, writer)
         
         while True:
-            event = await asyncio.wait_for(async_read_event(reader), timeout=TIMEOUT_SECONDS)
+            try:
+                event = await asyncio.wait_for(async_read_event(reader), timeout=TIMEOUT_SECONDS)
+            except asyncio.TimeoutError:
+                _LOGGER.warning(f"Timeout waiting for audio from TTS server for text: '{text[:50]}...'")
+                break
             
             if event is None or AudioStop.is_type(event.type):
                 break
