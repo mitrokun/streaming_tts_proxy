@@ -143,13 +143,22 @@ class PiperProcessManager:
         done_event: asyncio.Event,
         is_debug: bool,
     ):
-        while True:
-            line_bytes = await stderr.readline()
-            if not line_bytes:
-                break
-            line = line_bytes.decode(errors="ignore").strip()
-            if is_debug:
-                _LOGGER.debug("Piper stderr: %s", line)
-            if "Real-time factor" in line:
-                _LOGGER.debug("Synthesis completion detected in stderr.")
+        try:
+            while True:
+                line_bytes = await stderr.readline()
+                if not line_bytes:
+                    break
+                line = line_bytes.decode(errors="ignore").strip()
+                if is_debug:
+                    _LOGGER.debug("Piper stderr: %s", line)
+                if "Real-time factor" in line:
+                    _LOGGER.debug("Synthesis completion detected in stderr.")
+                    done_event.set()
+                    
+        except Exception:
+            _LOGGER.exception("Unexpected error while reading piper stderr")
+            
+        finally:
+            if not done_event.is_set():
+                _LOGGER.debug("Stderr stream finished; forcing synthesis done event.")
                 done_event.set()
