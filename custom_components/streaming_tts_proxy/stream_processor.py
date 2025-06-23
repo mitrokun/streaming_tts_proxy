@@ -151,24 +151,57 @@ class StreamProcessor:
             _LOGGER.debug(f"Resources for {host}:{port} cleaned up.")
 
     def _form_sentence(self, buffer_text: str) -> tuple[str, str]:
-        """Extracts the first complete sentence from the buffer."""
+        """
+        Extracts the first complete sentence from the buffer.
+        This method is language-agnostic regarding decimal separators.
+        """
         if not buffer_text:
             return "", ""
 
-        match = re.search(r"[.!?।。]", buffer_text)
+        # Use a unique placeholder to temporarily replace decimal points within numbers.
+        # This prevents the sentence splitter from breaking on numbers like "3.14".
+        # The placeholder must not be a character that can terminate a sentence.
+        DECIMAL_PLACEHOLDER = "##DEC##"
+        safe_text = re.sub(r'(\d)\.(\d)', fr'\1{DECIMAL_PLACEHOLDER}\2', buffer_text)
+
+        match = re.search(r"[.!?।。]", safe_text)
         if match:
             end_index = match.start() + 1
-            return buffer_text[:end_index].strip(), buffer_text[end_index:].strip()
+            
+            # Split the text with the placeholder
+            sentence_part = safe_text[:end_index]
+            rest_part = safe_text[end_index:]
+            
+            # Restore the original decimal points in both parts before returning
+            final_sentence = sentence_part.replace(DECIMAL_PLACEHOLDER, '.')
+            final_rest = rest_part.replace(DECIMAL_PLACEHOLDER, '.')
+            
+            return final_sentence.strip(), final_rest.strip()
 
         max_chars = 200
-        if len(buffer_text) > max_chars:
-            search_area = buffer_text[:max_chars + 20]
+        if len(safe_text) > max_chars:
+            search_area = safe_text[:max_chars + 20]
             last_space_index = search_area.rfind(" ")
             if last_space_index > 0:
-                return buffer_text[:last_space_index].strip(), buffer_text[last_space_index:].strip()
+                # Split based on space, then restore decimal points
+                sentence_part = safe_text[:last_space_index]
+                rest_part = safe_text[last_space_index:]
+                
+                final_sentence = sentence_part.replace(DECIMAL_PLACEHOLDER, '.')
+                final_rest = rest_part.replace(DECIMAL_PLACEHOLDER, '.')
+                
+                return final_sentence.strip(), final_rest.strip()
             else:
-                return buffer_text[:max_chars], buffer_text[max_chars:]
+                # Force split at max_chars if no space is found
+                sentence_part = safe_text[:max_chars]
+                rest_part = safe_text[max_chars:]
 
+                final_sentence = sentence_part.replace(DECIMAL_PLACEHOLDER, '.')
+                final_rest = rest_part.replace(DECIMAL_PLACEHOLDER, '.')
+
+                return final_sentence, final_rest
+
+        # If no sentence end is found and text is not too long, return it as the remainder
         return "", buffer_text
     
     async def _synthesize_sentence(
