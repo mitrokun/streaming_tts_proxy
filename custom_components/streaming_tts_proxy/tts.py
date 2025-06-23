@@ -67,7 +67,6 @@ class StreamingTtsProxyEntity(TextToSpeechEntity):
         """Handle entity which will be added to HA, ensuring non-blocking startup."""
         await super().async_added_to_hass()
         
-        # Устанавливаем callback для будущих успешных соединений
         self._processor._on_primary_connect_callback = self.trigger_voice_reload
         
         _LOGGER.info("Scheduling initial voice list load...")
@@ -77,7 +76,6 @@ class StreamingTtsProxyEntity(TextToSpeechEntity):
         """A callback triggered by StreamProcessor on successful primary connection."""
         if not self._voices_loaded:
             _LOGGER.info("Primary TTS is back online, attempting to load voice list.")
-            # Здесь await уместен, так как это уже фоновая задача
             await self.async_load_voices()
 
     async def async_load_voices(self) -> None:
