@@ -14,7 +14,7 @@ from .const import TIMEOUT_SECONDS, DEFAULT_FALLBACK_SAMPLE_RATE, DEFAULT_SAMPLE
 
 _LOGGER = logging.getLogger(__name__)
 
-CONNECTION_TIMEOUT = 0.5
+CONNECTION_TIMEOUT = 0.1
 
 def create_wav_header(sample_rate: int, bits_per_sample: int, channels: int, data_size: int) -> bytes:
     """Creates a WAV header. data_size can be 0 for streaming."""
