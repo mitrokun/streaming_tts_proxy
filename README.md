@@ -3,7 +3,9 @@
 
 - This is a rough draft. Configure via GUI, specify the host and port of the Wyoming server. Go to the entry configuration and select a voice to complete the setup.
 - Text in the `set_conversation_response` block (e.g., transmitted via a variable) still cause problems for slow TTS. Although the text is processed in parts (divided into sentences), the audio for the first sentence must be created in less than 5 seconds. Additionally, the tts.speak service uses an legacy method (we obtain the full audio and send it to the client), so if the generation takes more than 5 seconds, you won't hear the sound on your satellite. This differs from the Wyoming satellite, which can wait for the result until the process is complete.
-![image](https://github.com/user-attachments/assets/22422853-0a8c-46fc-ab05-f80248dec4ab)
+
+![image](https://github.com/user-attachments/assets/e4bd8fce-4013-44b8-bea0-d901b8434240)
+
 
 - By the way, streaming response does not create a cache. To further reduce disk activity, I made a fix for Piper that disables the intermediate stage of creating a wav file; instead, it immediately returns a stream of raw data. Thus, all actions within a voice request are processed in memory. Do not use this fix for the Wyoming system integration, as it performs poorly with the stream and adds extra latency.
 
