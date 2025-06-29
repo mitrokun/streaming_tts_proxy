@@ -1,5 +1,3 @@
-# --- START OF FILE config_flow.py ---
-
 import logging
 from typing import Any
 
@@ -14,7 +12,6 @@ from homeassistant.config_entries import (
 from homeassistant.core import callback
 from homeassistant.helpers.selector import selector
 
-from wyoming.info import TtsVoice
 from .api import WyomingApi, CannotConnect, NoVoicesFound
 
 from .const import (
@@ -24,10 +21,12 @@ from .const import (
     CONF_LANGUAGE,
     CONF_VOICE,
     CONF_SAMPLE_RATE,
+    CONF_SUPPORTS_STREAMING,
     CONF_FALLBACK_TTS_HOST,
     CONF_FALLBACK_TTS_PORT,
     CONF_FALLBACK_VOICE,
     CONF_FALLBACK_SAMPLE_RATE,
+    CONF_FALLBACK_SUPPORTS_STREAMING,
     DEFAULT_TTS_HOST,
     DEFAULT_TTS_PORT,
     DEFAULT_LANGUAGE,
@@ -65,7 +64,16 @@ class StreamingTtsProxyConfigFlow(ConfigFlow, domain=DOMAIN):
 
             try:
                 api = WyomingApi(user_input[CONF_TTS_HOST], user_input[CONF_TTS_PORT])
-                await api.get_voices_info()
+                server_info = await api.get_server_info()
+                
+                user_input[CONF_SUPPORTS_STREAMING] = server_info.supports_streaming
+                _LOGGER.info(
+                    "Server %s:%s supports native streaming: %s. Saving to config.",
+                    user_input[CONF_TTS_HOST],
+                    user_input[CONF_TTS_PORT],
+                    server_info.supports_streaming,
+                )
+
             except CannotConnect:
                 errors["base"] = "cannot_connect"
             except NoVoicesFound:
@@ -82,24 +90,23 @@ class StreamingTtsProxyConfigFlow(ConfigFlow, domain=DOMAIN):
 
 
 class OptionsFlowHandler(OptionsFlowWithConfigEntry):
-    """Handle an options flow for Streaming TTS Proxy."""
+    # ... этот класс остается без изменений ...
     async def async_step_init(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         """Manage the options."""
         errors: dict[str, str] = {}
         if user_input is not None:
-            # The logic to merge with existing options is handled by Home Assistant
             return self.async_create_entry(title="", data=user_input)
         
-        all_voices_info: list[TtsVoice] = []
+        all_voices = []
         supported_languages: list[str] = []
         
         try:
             api = WyomingApi(self.config_entry.data[CONF_TTS_HOST], self.config_entry.data[CONF_TTS_PORT])
-            all_voices_info = await api.get_voices_info()
+            server_info = await api.get_server_info()
+            all_voices = server_info.voices
             
-            # Extract unique languages from all available voices
             lang_set = set()
-            for voice_info in all_voices_info:
+            for voice_info in all_voices:
                 if voice_info.languages:
                     lang_set.update(voice_info.languages)
             supported_languages = sorted(list(lang_set))
@@ -108,12 +115,10 @@ class OptionsFlowHandler(OptionsFlowWithConfigEntry):
             _LOGGER.warning("Could not connect to primary TTS to get languages/voices for options UI: %s", e)
             errors["base"] = "cannot_connect"
         
-        # Combine config and options to get current values
         current_config = {**self.config_entry.data, **self.options}
 
         schema_fields = {}
         
-        # --- Language Selector ---
         if supported_languages:
             default_lang = current_config.get(CONF_LANGUAGE, DEFAULT_LANGUAGE)
             if default_lang not in supported_languages:
@@ -128,8 +133,7 @@ class OptionsFlowHandler(OptionsFlowWithConfigEntry):
                 default=current_config.get(CONF_LANGUAGE, DEFAULT_LANGUAGE)
             )] = str
 
-        # --- Voice Selector ---
-        all_voice_names = sorted([v.name for v in all_voices_info])
+        all_voice_names = sorted([v.name for v in all_voices])
         if all_voice_names:
             default_voice = current_config.get(CONF_VOICE, DEFAULT_VOICE)
             if default_voice not in all_voice_names:
@@ -144,7 +148,6 @@ class OptionsFlowHandler(OptionsFlowWithConfigEntry):
                 default=current_config.get(CONF_VOICE, DEFAULT_VOICE)
             )] = str
 
-        # --- Other fields ---
         schema_fields[vol.Optional(
             CONF_SAMPLE_RATE,
             description={"suggested_value": current_config.get(CONF_SAMPLE_RATE, DEFAULT_SAMPLE_RATE)}
@@ -169,7 +172,10 @@ class OptionsFlowHandler(OptionsFlowWithConfigEntry):
             CONF_FALLBACK_SAMPLE_RATE,
             description={"suggested_value": current_config.get(CONF_FALLBACK_SAMPLE_RATE, DEFAULT_FALLBACK_SAMPLE_RATE)}
         )] = int
+
+        schema_fields[vol.Optional(
+            CONF_FALLBACK_SUPPORTS_STREAMING,
+            default=current_config.get(CONF_FALLBACK_SUPPORTS_STREAMING, False)
+        )] = selector({"boolean": {}})
             
         return self.async_show_form(step_id="init", data_schema=vol.Schema(schema_fields), errors=errors)
-
-# --- END OF FILE config_flow.py ---

@@ -22,21 +22,27 @@
     "step": {
       "init": {
         "title": "Streaming TTS Proxy Settings",
-        "description": "Here you can change the default voice parameters and configure an optional fallback TTS server.",
+        "description": "Default voice parameters and fallback TTS server configuration.",
         "data": {
-          "language": "Default language",
-          "voice": "Default voice",
-          "sample_rate": "[Optional] Sample Rate. Default 22050 (Hz)",
+          "language": "Default Language",
+          "voice": "Default Voice",
+          "sample_rate": "[Optional] Primary Server Sample Rate (Hz)",
           "fallback_tts_host": "[Optional] Fallback TTS Server Host",
           "fallback_tts_port": "[Optional] Fallback TTS Server Port",
-          "fallback_voice": "[Optional] Voice for the fallback server",
-          "fallback_sample_rate": "[Optional] Fallback server Sample Rate (Hz)"
+          "fallback_voice": "[Optional] Fallback Server Voice",
+          "fallback_sample_rate": "[Optional] Fallback Server Sample Rate (Hz)",
+          "fallback_supports_streaming": "Native streaming mode"
+        },
+        "data_description": {
+          "sample_rate": "Value for the WAV header, typically 22050. A mismatched value will change the audio pitch. It's a feature, not a bug.",
+          "fallback_voice": "The voice name can be found in the Media > Text-to-Speech section after adding the server as a standard TTS integration.",
+          "fallback_sample_rate": "Similar to the primary server's sample rate parameter.",
+          "fallback_supports_streaming": "Enable this if the fallback server is running in the corresponding mode."
         }
       }
     },
     "error": {
-      "cannot_connect": "Could not connect to the TTS server. Please check the host and port.",
-      "no_voices_found": "Could not retrieve a list of voices from the server. Ensure the TTS server is configured and running.",
+      "cannot_connect": "Failed to connect to the TTS server to retrieve settings. Please check the host and port.",
       "unknown": "An unknown error occurred."
     }
   }

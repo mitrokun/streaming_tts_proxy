@@ -1,5 +1,3 @@
-# --- START OF FILE __init__.py ---
-
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 
@@ -8,13 +6,14 @@ from .const import (
     CONF_TTS_HOST, 
     CONF_TTS_PORT,
     CONF_SAMPLE_RATE,
+    CONF_SUPPORTS_STREAMING,
     CONF_FALLBACK_TTS_HOST,
     CONF_FALLBACK_TTS_PORT,
     CONF_FALLBACK_VOICE,
     CONF_FALLBACK_SAMPLE_RATE,
+    CONF_FALLBACK_SUPPORTS_STREAMING,
     DEFAULT_SAMPLE_RATE,
     DEFAULT_FALLBACK_SAMPLE_RATE,
-
 )
 from .stream_processor import StreamProcessor
 from .api import WyomingApi
@@ -32,7 +31,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         port=config[CONF_TTS_PORT]
     )
     
+    # --- ГЛАВНОЕ ИЗМЕНЕНИЕ ---
+    # Читаем сохраненный флаг и передаем его в процессор
+    use_streaming = config.get(CONF_SUPPORTS_STREAMING, False)
+    
     processor = StreamProcessor(
+        primary_supports_streaming=config.get(CONF_SUPPORTS_STREAMING, False),
+        fallback_supports_streaming=config.get(CONF_FALLBACK_SUPPORTS_STREAMING, False),
         tts_host=config[CONF_TTS_HOST],
         tts_port=config[CONF_TTS_PORT],
         sample_rate=config.get(CONF_SAMPLE_RATE, DEFAULT_SAMPLE_RATE),
@@ -63,5 +68,3 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 async def async_reload_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
     """Reload config entry when options are updated."""
     await hass.config_entries.async_reload(entry.entry_id)
-
-# --- END OF FILE __init__.py ---
