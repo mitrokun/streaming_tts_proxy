@@ -31,10 +31,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         port=config[CONF_TTS_PORT]
     )
     
-    # --- ГЛАВНОЕ ИЗМЕНЕНИЕ ---
-    # Читаем сохраненный флаг и передаем его в процессор
-    use_streaming = config.get(CONF_SUPPORTS_STREAMING, False)
-    
     processor = StreamProcessor(
         primary_supports_streaming=config.get(CONF_SUPPORTS_STREAMING, False),
         fallback_supports_streaming=config.get(CONF_FALLBACK_SUPPORTS_STREAMING, False),
