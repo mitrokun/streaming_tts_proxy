@@ -25,3 +25,33 @@ To set up a fallback server, you will need to know the voice's name. You can fin
 Example for PiperTTS configuration on the `192.168.1.199` host:
 
 ![image](https://github.com/user-attachments/assets/d01bcf2e-caf2-4bd7-922f-af6771959f90)
+
+```mermaid
+flowchart TD
+ subgraph subGraph0["Start: Received TTS request (text, voice)"]
+        A["processor.async_process_stream"]
+  end
+ subgraph subGraph1["Execution: Audio generation"]
+        J1["Call _stream_native_to_target"]
+        F1["MODE: Native streaming"]
+        J2["Call _stream_by_sentence_to_target"]
+        F2["MODE: By sentences"]
+  end
+    A --> B{"Check PRIMARY server"}
+    B -- Success --> C["Select PRIMARY server"]
+    B -- Error --> D{"Check BACKUP server"}
+    C --> E{"Does primary server support native streaming?"}
+    E -- Yes --> F1
+    E -- No --> F2
+    D -- Success --> G["Select BACKUP server"]
+    D -- Error --> H["ERROR: Both servers unavailable. Raise ConnectionRefusedError"]
+    G --> I{"Does backup server support native streaming?"}
+    I -- Yes --> F1
+    I -- No --> F2
+    F1 --> J1
+    F2 --> J2
+    J1 --> K["Deliver audio chunks as received"]
+    J2 --> K
+    K --> L["End of stream"]
+    H --> M["Request fails with error"]
+```
