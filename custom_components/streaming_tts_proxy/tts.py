@@ -84,8 +84,6 @@ class StreamingTtsProxyEntity(TextToSpeechEntity):
         try:
             server_info: ServerInfo = await self._api_client.get_server_info()
             
-            # --- ГЛАВНОЕ ИЗМЕНЕНИЕ ---
-            # Устанавливаем режим работы процессора здесь, в фоновой задаче
             self._processor.use_native_streaming = server_info.supports_streaming
             
             voice_languages: set[str] = set()
@@ -119,8 +117,6 @@ class StreamingTtsProxyEntity(TextToSpeechEntity):
             self._voices_loaded = False
 
 
-    # ... все остальные свойства и методы (@property, async_get_tts_audio, async_stream_tts_audio) остаются без изменений ...
-    # Они уже вызывают универсальный self._processor.async_process_stream, так что их трогать не нужно.
     @property
     def _config(self) -> dict:
         return {**self._config_entry.data, **self._config_entry.options}
