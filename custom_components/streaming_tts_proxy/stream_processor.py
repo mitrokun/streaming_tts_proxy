@@ -86,7 +86,6 @@ class StreamProcessor:
         """
         target_server = None
 
-        # --- Попытка подключения к ОСНОВНОМУ серверу ---
         try:
             _LOGGER.debug("Quick-checking PRIMARY server %s:%s", self.tts_host, self.tts_port)
             reader, writer = await asyncio.wait_for(
@@ -102,7 +101,6 @@ class StreamProcessor:
         except (ConnectionRefusedError, asyncio.TimeoutError, OSError) as e:
             _LOGGER.debug("Quick-check for PRIMARY server failed: %s. Trying fallback.", e)
 
-        # --- Попытка подключения к РЕЗЕРВНОМУ серверу (если основной не удался) ---
         if target_server is None:
             if not self.fallback_tts_host or not self.fallback_tts_port:
                 _LOGGER.error("Primary server failed and no fallback is configured.")
@@ -124,7 +122,6 @@ class StreamProcessor:
                 raise ConnectionRefusedError("Both primary and fallback TTS servers are unavailable.")
 
         try:
-            # Определяем, какой режим использовать для ВЫБРАННОГО сервера
             should_use_native_stream = (
                 target_server["is_primary"] and self.primary_supports_streaming
             ) or (
