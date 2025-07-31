@@ -1,13 +1,15 @@
 
 ## Alternative Wyoming TTS Client with streaming synthesis method
-
+ The voice component of HA is under active development, so the information in the description may be out of date.
 - This is a rough draft. Configure via GUI, specify the host and port of the Wyoming server. Go to the entry configuration and select a voice to complete the setup.
 - [HA 2025.07] Text in the `set_conversation_response` block (e.g., transmitted via a variable) and tts.speak service uses an legacy method (we obtain the full audio and send it to the client).
 ###### It is possible to manually tweak the system component code to improve the response time a bit. I wrote about it [here](https://github.com/home-assistant/core/issues/147727#issuecomment-3017257965). A similar thing can be done for the announcement action. But since the changes will disappear with every update, let's hope that the developers will independently improve this functionality in future updates.
-![image](https://github.com/user-attachments/assets/d9a4089a-7f64-40e7-aeca-71958061190a)
+<img width="1128" height="631" alt="image" src="https://github.com/user-attachments/assets/679502dd-f64d-44d9-9466-10135a2667e1" />
 
 
-- By the way, streaming response does not create a cache. To further reduce disk activity, I made a fix for Piper that disables the intermediate stage of creating a wav file; instead, it immediately returns a stream of raw data. Thus, all actions within a voice request are processed in memory. Do not use this fix for the Wyoming system integration, as it performs poorly with the stream and adds extra latency.
+
+
+- By the way, streaming response does not create a cache (long-term as a file, but temporary is still present, e.g. to be able to debug). To further reduce disk activity, I made a fix for Piper that disables the intermediate stage of creating a wav file; instead, it immediately returns a stream of raw data. Thus, all actions within a voice request are processed in memory. Do not use this fix for the Wyoming system integration, as it performs poorly with the stream and adds extra latency.
 
 #### A few [diagrams](https://github.com/mitrokun/streaming_tts_proxy/blob/main/DIAGRAM.md)
 
