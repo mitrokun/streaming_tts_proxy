@@ -1,7 +1,6 @@
-# --- START OF FILE api.py ---
-
 import asyncio
 import logging
+from dataclasses import dataclass
 from typing import List
 
 from homeassistant.exceptions import HomeAssistantError
@@ -17,6 +16,12 @@ class CannotConnect(HomeAssistantError):
 class NoVoicesFound(HomeAssistantError):
     """Error to indicate that no voices were found on the server."""
 
+@dataclass
+class ServerInfo:
+    """Holds information about the Wyoming server's capabilities."""
+    voices: List[TtsVoice]
+    supports_streaming: bool
+
 class WyomingApi:
     """A simple class to manage API interactions with a Wyoming server."""
 
@@ -25,9 +30,9 @@ class WyomingApi:
         self.host = host
         self.port = port
 
-    async def get_voices_info(self) -> List[TtsVoice]:
-        """Fetch and return the list of available TTS voices with their full info."""
-        _LOGGER.debug("Attempting to get voices info from %s:%s", self.host, self.port)
+    async def get_server_info(self) -> ServerInfo:
+        """Fetch and return info about available TTS voices and capabilities."""
+        _LOGGER.debug("Attempting to get server info from %s:%s", self.host, self.port)
         try:
             async with AsyncTcpClient(self.host, self.port) as client:
                 await client.write_event(Describe().event())
@@ -38,11 +43,18 @@ class WyomingApi:
 
                 info = Info.from_event(event)
                 
+                # Check if any installed TTS service supports native streaming
+                supports_streaming = any(
+                    tts.supports_synthesize_streaming
+                    for tts in info.tts
+                    if tts.installed
+                )
+                
                 # Collect a list of full TtsVoice objects
                 voices = [
                     voice
                     for tts_program in info.tts
-                    if tts_program.voices
+                    if tts_program.installed and tts_program.voices
                     for voice in tts_program.voices
                     if voice.installed
                 ]
@@ -50,10 +62,12 @@ class WyomingApi:
                 if not voices:
                     raise NoVoicesFound(f"Server {self.host}:{self.port} returned no voices")
 
-                _LOGGER.debug("Found %d voices", len(voices))
-                return voices
+                _LOGGER.debug(
+                    "Found %d voices. Native streaming support: %s",
+                    len(voices),
+                    supports_streaming,
+                )
+                return ServerInfo(voices=voices, supports_streaming=supports_streaming)
 
         except (asyncio.TimeoutError, ConnectionRefusedError, OSError) as err:
             raise CannotConnect(f"Connection failed for {self.host}:{self.port}") from err
-
-# --- END OF FILE api.py ---

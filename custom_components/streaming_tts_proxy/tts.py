@@ -1,9 +1,7 @@
-# --- START OF FILE tts.py ---
-
+import asyncio
 import logging
-import struct
 from collections import defaultdict
-from typing import AsyncGenerator, Tuple, Callable, Awaitable
+from typing import Tuple
 
 from homeassistant.components.tts import (
     TextToSpeechEntity,
@@ -24,7 +22,7 @@ from .const import (
     DEFAULT_VOICE,
 )
 from .stream_processor import StreamProcessor
-from .api import WyomingApi, CannotConnect, NoVoicesFound
+from .api import WyomingApi, CannotConnect, NoVoicesFound, ServerInfo
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -34,7 +32,7 @@ async def async_setup_entry(
     config_entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    """Set up the TTS entity from a config entry."""
+    """Set up the TTS entity from a config entry. This setup must be fast."""
     entry_data = hass.data[DOMAIN][config_entry.entry_id]
     processor = entry_data["processor"]
     api_client = entry_data["api"]
@@ -56,52 +54,47 @@ class StreamingTtsProxyEntity(TextToSpeechEntity):
         self._api_client = api_client
         self._attr_unique_id = config_entry.entry_id
         self._voices: dict[str, list[Voice]] = defaultdict(list)
+        self._attr_name = config_entry.title
         self._attr_device_info = {
             "identifiers": {(DOMAIN, config_entry.entry_id)},
-            "name": self.name,
-            "manufacturer": "Custom Integration",
+            "name": config_entry.title,
         }
         self._voices_loaded = False
 
+
     async def async_added_to_hass(self) -> None:
-        """Handle entity which will be added to HA, ensuring non-blocking startup."""
+        """Handle entity which will be added to HA. Start background tasks here."""
         await super().async_added_to_hass()
-        
         self._processor._on_primary_connect_callback = self.trigger_voice_reload
-        
-        _LOGGER.info("Scheduling initial voice list load...")
+        _LOGGER.info("Scheduling initial load of voices and capabilities for %s...", self.name)
         self.hass.async_create_task(self.async_load_voices())
 
     async def trigger_voice_reload(self) -> None:
-        """A callback triggered by StreamProcessor on successful primary connection."""
+        """A callback triggered on successful primary connection."""
         if not self._voices_loaded:
-            _LOGGER.info("Primary TTS is back online, attempting to load voice list.")
+            _LOGGER.info("Primary TTS is back online for %s, attempting to load voices.", self.name)
             await self.async_load_voices()
 
     async def async_load_voices(self) -> None:
-        """Load voices from the Wyoming server."""
-        if self._voices_loaded:
-            _LOGGER.debug("Voice list already loaded, skipping.")
-            return
-
-        _LOGGER.debug("Attempting to load voices for %s", self.name)
+        """
+        Load voices and capabilities from the Wyoming server in the background.
+        This method sets the operational mode of the StreamProcessor.
+        """
+        _LOGGER.debug("Attempting to load voices and capabilities for %s", self.name)
         try:
-            # Get voices info
-            all_voices_info = await self._api_client.get_voices_info()
-
+            server_info: ServerInfo = await self._api_client.get_server_info()
+            
+            self._processor.use_native_streaming = server_info.supports_streaming
+            
             voice_languages: set[str] = set()
             new_voices_map: dict[str, list[Voice]] = defaultdict(list)
 
-            for voice_info in all_voices_info:
+            for voice_info in server_info.voices:
                 if voice_info.languages:
                     voice_languages.update(voice_info.languages)
-                
                 for lang in voice_info.languages or [self.default_language]:
                     new_voices_map[lang].append(
-                        Voice(
-                            voice_id=voice_info.name,
-                            name=voice_info.description or voice_info.name,
-                        )
+                        Voice(voice_id=voice_info.name, name=voice_info.description or voice_info.name)
                     )
 
             for lang in new_voices_map:
@@ -112,56 +105,44 @@ class StreamingTtsProxyEntity(TextToSpeechEntity):
             self._voices_loaded = True
             
             _LOGGER.info(
-                "Successfully loaded voices. Supported languages: %s",
-                self._attr_supported_languages,
+                "Successfully loaded voices for %s. Effective mode set to: %s",
+                self.name,
+                "Native Streaming" if self._processor.use_native_streaming else "Sentence-Based",
             )
             self.async_write_ha_state()
 
         except (CannotConnect, NoVoicesFound) as e:
-            _LOGGER.warning(
-                "Could not load voices from primary TTS server. Will try again later. Error: %s", e
+            _LOGGER.debug(
+                "Could not load voices from primary TTS server for %s. Will operate in safe (sentence-based) mode. Error: %s",
+                self.name, e
             )
-            self._voices.clear()
-            self._attr_supported_languages = [self.default_language]
             self._voices_loaded = False
 
 
     @property
     def _config(self) -> dict:
-        """Combine base data and options."""
         return {**self._config_entry.data, **self._config_entry.options}
 
     @property
-    def name(self) -> str:
-        """Return the name of the TTS entity."""
-        return f"Streaming TTS Proxy ({self._config_entry.data.get('tts_host')})"
-
-    @property
     def supported_languages(self) -> list[str]:
-        """Return a list of supported languages."""
-        langs = set(self._voices.keys())
-        if self.default_language:
-            langs.add(self.default_language)
-        return sorted(list(langs))
+        if not self._voices_loaded:
+            return [self.default_language]
+        return self._attr_supported_languages
 
     @property
     def default_language(self) -> str:
-        """Return the default language."""
         return self._config.get("language", DEFAULT_LANGUAGE)
 
     @property
     def default_voice(self) -> str:
-        """Return the default voice."""
         return self._config.get(CONF_VOICE, DEFAULT_VOICE)
 
     @property
     def supported_options(self) -> list[str]:
-        """Return a list of supported options."""
         return [ATTR_VOICE, ATTR_SPEAKER]
 
     @callback
     def async_get_supported_voices(self, language: str) -> list[Voice] | None:
-        """Return a list of supported voices for a language."""
         return self._voices.get(language)
     
     async def async_get_tts_audio(self, message: str, language: str, options: dict) -> Tuple[str, bytes]:
@@ -173,19 +154,14 @@ class StreamingTtsProxyEntity(TextToSpeechEntity):
 
         audio_generator = self._processor.async_process_stream(single_message_stream(), voice_name)
         
-        # The stream now includes the header, so we just join the chunks.
         all_chunks = [chunk async for chunk in audio_generator]
-        wav_data = b''.join(all_chunks)
-        
-        return "wav", wav_data
+        return "wav", b"".join(all_chunks)
 
     async def async_stream_tts_audio(self, request: TTSAudioRequest) -> TTSAudioResponse:
-        """Main streaming TTS method."""
+        """Main streaming TTS method, now fully trusting the processor."""
         voice_name = request.options.get(ATTR_VOICE, self.default_voice)
         
-        # We just pass its generator directly to the response.
-        audio_generator = self._processor.async_process_stream(request.message_gen, voice_name)
-        
-        return TTSAudioResponse(extension="wav", data_gen=audio_generator)
-
-# --- END OF FILE tts.py ---
+        return TTSAudioResponse(
+            extension="wav",
+            data_gen=self._processor.async_process_stream(request.message_gen, voice_name)
+        )
