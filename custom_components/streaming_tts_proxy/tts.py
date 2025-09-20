@@ -37,8 +37,6 @@ async def async_setup_entry(
     processor = entry_data["processor"]
     api_client = entry_data["api"]
 
-    # We no longer check API here to avoid blocking startup.
-    # The check is moved to a background task in the entity itself.
     entity = StreamingTtsProxyEntity(config_entry, processor, api_client)
     async_add_entities([entity])
 
@@ -56,23 +54,25 @@ class StreamingTtsProxyEntity(TextToSpeechEntity):
         self._api_client = api_client
         self._attr_unique_id = config_entry.entry_id
         self._voices: dict[str, list[Voice]] = defaultdict(list)
+        self._attr_name = config_entry.title
         self._attr_device_info = {
             "identifiers": {(DOMAIN, config_entry.entry_id)},
-            "name": self.name,
+            "name": config_entry.title,
         }
         self._voices_loaded = False
+
 
     async def async_added_to_hass(self) -> None:
         """Handle entity which will be added to HA. Start background tasks here."""
         await super().async_added_to_hass()
         self._processor._on_primary_connect_callback = self.trigger_voice_reload
-        _LOGGER.info("Scheduling initial load of voices and capabilities...")
+        _LOGGER.info("Scheduling initial load of voices and capabilities for %s...", self.name)
         self.hass.async_create_task(self.async_load_voices())
 
     async def trigger_voice_reload(self) -> None:
         """A callback triggered on successful primary connection."""
         if not self._voices_loaded:
-            _LOGGER.info("Primary TTS is back online, attempting to load voices and capabilities.")
+            _LOGGER.info("Primary TTS is back online for %s, attempting to load voices.", self.name)
             await self.async_load_voices()
 
     async def async_load_voices(self) -> None:
@@ -105,14 +105,16 @@ class StreamingTtsProxyEntity(TextToSpeechEntity):
             self._voices_loaded = True
             
             _LOGGER.info(
-                "Successfully loaded voices. Effective mode set to: %s",
+                "Successfully loaded voices for %s. Effective mode set to: %s",
+                self.name,
                 "Native Streaming" if self._processor.use_native_streaming else "Sentence-Based",
             )
             self.async_write_ha_state()
 
         except (CannotConnect, NoVoicesFound) as e:
-            _LOGGER.warning(
-                "Could not load voices from primary TTS server. Will operate in safe (sentence-based) mode. Error: %s", e
+            _LOGGER.debug(
+                "Could not load voices from primary TTS server for %s. Will operate in safe (sentence-based) mode. Error: %s",
+                self.name, e
             )
             self._voices_loaded = False
 
@@ -122,15 +124,10 @@ class StreamingTtsProxyEntity(TextToSpeechEntity):
         return {**self._config_entry.data, **self._config_entry.options}
 
     @property
-    def name(self) -> str:
-        return f"Streaming TTS Proxy ({self._config_entry.data.get('tts_host')})"
-
-    @property
     def supported_languages(self) -> list[str]:
-        langs = set(self._voices.keys())
-        if self.default_language:
-            langs.add(self.default_language)
-        return sorted(list(langs))
+        if not self._voices_loaded:
+            return [self.default_language]
+        return self._attr_supported_languages
 
     @property
     def default_language(self) -> str:
