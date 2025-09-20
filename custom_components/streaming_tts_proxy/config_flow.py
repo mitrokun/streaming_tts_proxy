@@ -3,6 +3,7 @@ from typing import Any
 
 import voluptuous as vol
 
+from homeassistant.const import CONF_NAME
 from homeassistant.config_entries import (
     ConfigEntry,
     ConfigFlow,
@@ -39,6 +40,7 @@ _LOGGER = logging.getLogger(__name__)
 
 INITIAL_DATA_SCHEMA = vol.Schema(
     {
+        vol.Required(CONF_NAME, default="TTS Proxy"): str,
         vol.Required(CONF_TTS_HOST, default=DEFAULT_TTS_HOST): str,
         vol.Required(CONF_TTS_PORT, default=DEFAULT_TTS_PORT): int,
     }
@@ -82,15 +84,16 @@ class StreamingTtsProxyConfigFlow(ConfigFlow, domain=DOMAIN):
                 _LOGGER.error("Unknown error during setup: %s", e, exc_info=True)
                 errors["base"] = "unknown"
             else:
+                title = user_input.pop(CONF_NAME)
                 return self.async_create_entry(
-                    title=f"TTS Proxy ({user_input[CONF_TTS_HOST]})", data=user_input
+                    title=title, data=user_input
                 )
         
         return self.async_show_form(step_id="user", data_schema=INITIAL_DATA_SCHEMA, errors=errors)
 
 
 class OptionsFlowHandler(OptionsFlowWithConfigEntry):
-    # ... этот класс остается без изменений ...
+
     async def async_step_init(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         """Manage the options."""
         errors: dict[str, str] = {}
