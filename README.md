@@ -2,10 +2,8 @@
 ## Alternative Wyoming TTS Client with streaming synthesis method
  The voice component of HA is under active development, so the information in the description may be out of date.
 - This is a rough draft. Configure via GUI, specify the host and port of the Wyoming server. Go to the entry configuration and select a voice to complete the setup.
-- [HA 2025.07] Text in the `set_conversation_response` block (e.g., transmitted via a variable) and tts.speak service uses an legacy method (we obtain the full audio and send it to the client).
-###### It is possible to manually tweak the system component code to improve the response time a bit. I wrote about it [here](https://github.com/home-assistant/core/issues/147727#issuecomment-3017257965). A similar thing can be done for the announcement action. But since the changes will disappear with every update, let's hope that the developers will independently improve this functionality in future updates.
-<img width="1128" height="631" alt="image" src="https://github.com/user-attachments/assets/679502dd-f64d-44d9-9466-10135a2667e1" />
 
+<img width="760" height="396" alt="image" src="https://github.com/user-attachments/assets/2961ccf2-fc40-483a-a4eb-64bc4ce0bed9" />
 
 
 
