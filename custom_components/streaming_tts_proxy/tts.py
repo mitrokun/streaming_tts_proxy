@@ -1,7 +1,7 @@
 import asyncio
 import logging
 from collections import defaultdict
-from typing import Tuple
+from typing import Tuple, TypedDict
 
 from homeassistant.components.tts import (
     TextToSpeechEntity,
@@ -12,10 +12,12 @@ from homeassistant.components.tts import (
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.storage import Store
 
 from .const import (
     DOMAIN,
     CONF_VOICE,
+    CONF_FALLBACK_VOICE,
     ATTR_VOICE,
     ATTR_SPEAKER,
     DEFAULT_LANGUAGE,
@@ -25,6 +27,12 @@ from .stream_processor import StreamProcessor
 from .api import WyomingApi, CannotConnect, NoVoicesFound, ServerInfo
 
 _LOGGER = logging.getLogger(__name__)
+
+class VoiceCache(TypedDict):
+    voices: dict[str, list[dict]]
+    languages: list[str]
+
+CACHE_VERSION = 1
 
 
 async def async_setup_entry(
@@ -37,13 +45,14 @@ async def async_setup_entry(
     processor = entry_data["processor"]
     api_client = entry_data["api"]
 
-    entity = StreamingTtsProxyEntity(config_entry, processor, api_client)
+    entity = StreamingTtsProxyEntity(hass, config_entry, processor, api_client)
     async_add_entities([entity])
 
 
 class StreamingTtsProxyEntity(TextToSpeechEntity):
     def __init__(
         self,
+        hass: HomeAssistant,
         config_entry: ConfigEntry,
         processor: StreamProcessor,
         api_client: WyomingApi,
@@ -60,6 +69,8 @@ class StreamingTtsProxyEntity(TextToSpeechEntity):
             "name": config_entry.title,
         }
         self._voices_loaded = False
+        self._attr_supported_languages: list[str] = []
+        self._store: Store[VoiceCache] = Store(hass, CACHE_VERSION, f"{DOMAIN}_voices_{config_entry.entry_id}")
 
 
     async def async_added_to_hass(self) -> None:
@@ -71,21 +82,19 @@ class StreamingTtsProxyEntity(TextToSpeechEntity):
 
     async def trigger_voice_reload(self) -> None:
         """A callback triggered on successful primary connection."""
-        if not self._voices_loaded:
-            _LOGGER.info("Primary TTS is back online for %s, attempting to load voices.", self.name)
-            await self.async_load_voices()
+        _LOGGER.info("Primary TTS is back online for %s, refreshing voices and cache.", self.name)
+        await self.async_load_voices()
 
     async def async_load_voices(self) -> None:
         """
-        Load voices and capabilities from the Wyoming server in the background.
-        This method sets the operational mode of the StreamProcessor.
+        Load voices from the server, save to cache. On failure, load from cache.
         """
         _LOGGER.debug("Attempting to load voices and capabilities for %s", self.name)
         try:
             server_info: ServerInfo = await self._api_client.get_server_info()
-            
-            self._processor.use_native_streaming = server_info.supports_streaming
-            
+
+            self._processor.primary_supports_streaming = server_info.supports_streaming
+
             voice_languages: set[str] = set()
             new_voices_map: dict[str, list[Voice]] = defaultdict(list)
 
@@ -96,38 +105,42 @@ class StreamingTtsProxyEntity(TextToSpeechEntity):
                     new_voices_map[lang].append(
                         Voice(voice_id=voice_info.name, name=voice_info.description or voice_info.name)
                     )
-
-            for lang in new_voices_map:
-                new_voices_map[lang] = sorted(new_voices_map[lang], key=lambda v: v.name)
-
-            self._voices = new_voices_map
+            
+            self._voices = {lang: sorted(v_list, key=lambda v: v.name) for lang, v_list in new_voices_map.items()}
             self._attr_supported_languages = sorted(list(voice_languages))
             self._voices_loaded = True
-            
-            _LOGGER.info(
-                "Successfully loaded voices for %s. Effective mode set to: %s",
-                self.name,
-                "Native Streaming" if self._processor.use_native_streaming else "Sentence-Based",
-            )
-            self.async_write_ha_state()
+
+            _LOGGER.info("Successfully loaded %d voices for %s from server.", len(server_info.voices), self.name)
+
+            cache_data: VoiceCache = {
+                "voices": {lang: [{'voice_id': v.voice_id, 'name': v.name} for v in v_list] for lang, v_list in self._voices.items()},
+                "languages": self._attr_supported_languages,
+            }
+            await self._store.async_save(cache_data)
+            _LOGGER.debug("Voice cache saved for %s", self.name)
 
         except (CannotConnect, NoVoicesFound) as e:
-            _LOGGER.debug(
-                "Could not load voices from primary TTS server for %s. Will operate in safe (sentence-based) mode. Error: %s",
-                self.name, e
-            )
-            self._voices_loaded = False
-
+            _LOGGER.warning("Could not load voices from primary server for %s: %s. Attempting to load from cache.", self.name, e)
+            
+            if (cached_data := await self._store.async_load()):
+                self._voices = {
+                    lang: [Voice(v["voice_id"], v["name"]) for v in v_list]
+                    for lang, v_list in cached_data["voices"].items()
+                }
+                self._attr_supported_languages = cached_data["languages"]
+                self._voices_loaded = True
+                _LOGGER.info("Successfully loaded %d voices for %s from cache.", sum(len(v) for v in self._voices.values()), self.name)
+            else:
+                _LOGGER.warning("Voice cache not found. TTS for %s will be unavailable until the primary server is connected.", self.name)
+                self._voices.clear()
+                self._attr_supported_languages = []
+                self._voices_loaded = False
+        
+        self.async_write_ha_state()
 
     @property
     def _config(self) -> dict:
         return {**self._config_entry.data, **self._config_entry.options}
-
-    @property
-    def supported_languages(self) -> list[str]:
-        if not self._voices_loaded:
-            return [self.default_language]
-        return self._attr_supported_languages
 
     @property
     def default_language(self) -> str:
@@ -146,7 +159,6 @@ class StreamingTtsProxyEntity(TextToSpeechEntity):
         return self._voices.get(language)
     
     async def async_get_tts_audio(self, message: str, language: str, options: dict) -> Tuple[str, bytes]:
-        """Legacy TTS method for non-streaming playback."""
         voice_name = options.get(ATTR_VOICE, self.default_voice)
         
         async def single_message_stream():
@@ -158,7 +170,6 @@ class StreamingTtsProxyEntity(TextToSpeechEntity):
         return "wav", b"".join(all_chunks)
 
     async def async_stream_tts_audio(self, request: TTSAudioRequest) -> TTSAudioResponse:
-        """Main streaming TTS method, now fully trusting the processor."""
         voice_name = request.options.get(ATTR_VOICE, self.default_voice)
         
         return TTSAudioResponse(
