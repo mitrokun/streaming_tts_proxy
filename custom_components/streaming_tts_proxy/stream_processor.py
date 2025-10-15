@@ -151,60 +151,69 @@ class StreamProcessor:
                     pass
             _LOGGER.debug("Stream processing finished for %s:%s.", target_server['host'], target_server['port'])
 
+
     async def _stream_native_to_target(self, text_gen: AsyncIterable[str], server_info: dict) -> AsyncIterable[bytes]:
-        """Core logic for native streaming, refactored to match HA's robust generator pattern."""
-        reader = server_info["reader"]
-        writer = server_info["writer"]
-        
-        yield create_wav_header(server_info["sample_rate"], 16, 1)
+            """
+            Robust native streaming that correctly handles both continuous
+            and intermittent audio responses (with audiostop).
+            """
+            reader = server_info["reader"]
+            writer = server_info["writer"]
+            
+            if server_info["is_primary"] and self._on_primary_connect_callback:
+                asyncio.create_task(self._on_primary_connect_callback())
 
-        if server_info["is_primary"] and self._on_primary_connect_callback:
-            asyncio.create_task(self._on_primary_connect_callback())
+            writer_task = None
+            try:
+                async def _write_text_stream():
+                    """Writes text chunks to the server in a fire-and-forget background task."""
+                    try:
+                        voice = SynthesizeVoice(name=server_info["voice"]) if server_info["voice"] else None
+                        await async_write_event(SynthesizeStart(voice=voice).event(), writer)
+                        async for text_chunk in text_gen:
+                            await async_write_event(SynthesizeChunk(text=text_chunk).event(), writer)
+                            await asyncio.sleep(0)
+                        await async_write_event(SynthesizeStop().event(), writer)
+                    except (ConnectionError, OSError) as e:
+                        _LOGGER.warning("TTS client disconnected while writing: %s", e)
+                    except Exception:
+                        _LOGGER.exception("Unexpected error while writing to TTS client")
 
-        writer_task = None
-        try:
-            async def _write_text_stream():
-                """Writes text chunks to the server in a fire-and-forget background task."""
-                try:
-                    voice = SynthesizeVoice(name=server_info["voice"]) if server_info["voice"] else None
-                    await async_write_event(SynthesizeStart(voice=voice).event(), writer)
-                    async for text_chunk in text_gen:
-                        await async_write_event(SynthesizeChunk(text=text_chunk).event(), writer)
-                    await async_write_event(SynthesizeStop().event(), writer)
-                except (ConnectionError, OSError) as e:
-                    _LOGGER.warning("TTS client disconnected while writing: %s", e)
-                except Exception:
-                    _LOGGER.exception("Unexpected error while writing to TTS client")
+                writer_task = asyncio.create_task(_write_text_stream())
 
-            writer_task = asyncio.create_task(_write_text_stream())
+                header_sent = False
+                
+                while event := await async_read_event(reader):
+                    if AudioStart.is_type(event.type):
+                        if not header_sent:
+                            yield create_wav_header(server_info["sample_rate"], 16, 1)
+                            header_sent = True
 
-            async def _read_audio_stream() -> AsyncIterable[bytes]:
-                """Reads audio events from the server and yields WAV audio chunks."""
-                try:
-                    while True:
-                        event = await async_read_event(reader)
-                        if event is None or SynthesizeStopped.is_type(event.type):
-                            # Audio stream terminated by server
-                            break
-                        if AudioChunk.is_type(event.type):
-                            yield AudioChunk.from_event(event).audio
-                except (ConnectionError, OSError) as e:
-                    _LOGGER.warning("TTS client disconnected while reading: %s", e)
-                except Exception:
-                    _LOGGER.exception("Unexpected error while reading from TTS client")
+                    elif AudioChunk.is_type(event.type):
+                        yield AudioChunk.from_event(event).audio
 
-            async for audio_chunk in _read_audio_stream():
-                yield audio_chunk
+                    elif AudioStop.is_type(event.type):
+                        _LOGGER.debug("Received intermediate AudioStop, continuing stream.")
+                        continue
 
-        finally:
-            # Guaranteed resource cleanup
-            if writer_task and not writer_task.done():
-                writer_task.cancel()
-                await asyncio.sleep(0)
+                    elif SynthesizeStopped.is_type(event.type):
+                        _LOGGER.debug("Received final SynthesizeStopped, ending stream.")
+                        break
+            
+            except (ConnectionError, OSError) as e:
+                _LOGGER.warning("TTS client disconnected while reading: %s", e)
+            except Exception:
+                _LOGGER.exception("Unexpected error while reading from TTS client")
+            finally:
+                if writer_task and not writer_task.done():
+                    writer_task.cancel()
+                    await asyncio.sleep(0)
 
 
     async def _stream_by_sentence_to_target(self, text_stream: AsyncIterable[str], server_info: dict) -> AsyncIterable[bytes]:
-        """Core logic for sentence-based streaming to a single, already connected server."""
+        """
+        Core logic for sentence-based streaming to a single server.
+        """
         reader = server_info["reader"]
         writer = server_info["writer"]
 
@@ -213,26 +222,30 @@ class StreamProcessor:
         if server_info["is_primary"] and self._on_primary_connect_callback:
             asyncio.create_task(self._on_primary_connect_callback())
         
-        text_buffer = []
+        text_buffer = ""
+
+        # Main loop: its task is to accumulate text from the stream.
         async for text_chunk in text_stream:
-            text_buffer.append(text_chunk)
-            current_text = "".join(text_buffer)
-            
-            while current_text:
-                sentence, rest = self._form_sentence(current_text)
+            text_buffer += text_chunk
+
+            while True:
+                sentence, rest = self._form_sentence(text_buffer)
+                
                 if sentence:
+                    # If a complete sentence is found, we send it for synthesis.
                     async for audio_chunk in self._synthesize_sentence(reader, writer, sentence, server_info["voice"]):
                         yield audio_chunk
-                    text_buffer = [rest]
-                    current_text = rest
+                    
+                    # We update the buffer, leaving only the tail in it.
+                    text_buffer = rest
                 else:
                     break
-        
-        final_text = "".join(text_buffer).strip()
+
+        # This code will be executed after the outer loop completes.
+        final_text = text_buffer.strip()
         if final_text:
             async for audio_chunk in self._synthesize_sentence(reader, writer, final_text, server_info["voice"]):
                 yield audio_chunk
-
     
     def _form_sentence(self, buffer_text: str) -> tuple[str, str]:
         """Splits text into a sentence and the remainder."""
