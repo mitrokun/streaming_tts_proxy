@@ -1,5 +1,7 @@
+import logging
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.storage import Store
 
 from .const import (
     DOMAIN, 
@@ -17,7 +19,9 @@ from .const import (
 )
 from .stream_processor import StreamProcessor
 from .api import WyomingApi
+from .tts import VoiceCache
 
+_LOGGER = logging.getLogger(__name__)
 PLATFORMS: list[str] = ["tts"]
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -64,3 +68,11 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 async def async_reload_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
     """Reload config entry when options are updated."""
     await hass.config_entries.async_reload(entry.entry_id)
+
+async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Handle removal of an entry."""
+
+    store: Store[VoiceCache] = Store(hass, 1, f"{DOMAIN}_voices_{entry.entry_id}")
+    
+    await store.async_remove()
+    _LOGGER.debug("Removed voice cache file for %s", entry.title)
