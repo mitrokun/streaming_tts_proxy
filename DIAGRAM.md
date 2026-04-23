@@ -1,51 +1,5 @@
-Current implementation for esp32 satellites, using tts with streaming support:
-```mermaid
-sequenceDiagram
-    participant ESPHome Satellite
-    participant AssistSatellite Entity
-    participant Assist Pipeline
-    participant LLM (Agent)
-    participant TextToSpeechView (HTTP)
-    participant TTS Engine
+Current implementation, using tts with streaming support:
 
-    ESPHome Satellite->>+AssistSatellite Entity: RunPipeline, AudioStream
-    AssistSatellite Entity->>+Assist Pipeline: async_accept_pipeline_from_satellite()
-    Note over Assist Pipeline: Stage: STT -> INTENT
-    
-    Assist Pipeline->>+LLM (Agent): Request response text
-    
-    %% Parallel processing starts
-    loop LLM generates response text
-        LLM (Agent)-->>Assist Pipeline: Event: INTENT_PROGRESS (with text delta)
-        note right of Assist Pipeline: chat_log_delta_listener
-        Assist Pipeline->>+TTS Engine: Sends text chunk for synthesis
-        Note over TTS Engine: Starts generating audio and writing to stream
-    end
-    
-    %% Synchronization Point: LLM must finish
-    LLM (Agent)-->>-Assist Pipeline: **Full response text (END)**
-    Assist Pipeline->>AssistSatellite Entity: Event: INTENT_END
-    
-    %% Command is sent AFTER LLM is finished
-    Assist Pipeline->>AssistSatellite Entity: Event: TTS_END (with a streaming URL)
-    AssistSatellite Entity->>+ESPHome Satellite: Command: "Play media from this URL"
-    
-    %% HTTP Streaming starts now
-    ESPHome Satellite->>+TextToSpeechView (HTTP): HTTP GET request to the streaming URL
-    Note over TextToSpeechView (HTTP): Opens a chunked transfer encoding response
-    
-    loop TTS Engine continues generating audio
-        TTS Engine-->>TextToSpeechView (HTTP): Audio data chunk
-        TextToSpeechView (HTTP)-->>ESPHome Satellite: Sends audio data chunk (HTTP Chunk)
-    end
-
-    TTS Engine-->>TextToSpeechView (HTTP): End of audio stream
-    TextToSpeechView (HTTP)-->>ESPHome Satellite: End of HTTP response
-```
----
-Final expected implementation for esp32 satellites. Modifications are required for HA components (assist_pipeline and assist_satellite). 
-
-Calling Assist via the UI already works in a similar way:
 ```mermaid
 sequenceDiagram
     participant ESPHome Satellite
@@ -90,7 +44,7 @@ sequenceDiagram
     TextToSpeechView (HTTP)-->>ESPHome Satellite: End of HTTP response
 ```
 ---
-The old method, still used for Wyoming satellite:
+The old method:
 ```mermaid
 sequenceDiagram
     participant Wyoming Satellite
