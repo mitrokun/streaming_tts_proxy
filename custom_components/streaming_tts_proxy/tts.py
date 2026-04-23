@@ -46,6 +46,9 @@ async def async_setup_entry(
     api_client = entry_data["api"]
 
     entity = StreamingTtsProxyEntity(hass, config_entry, processor, api_client)
+    
+    await entity.async_load_from_cache()
+
     async_add_entities([entity])
 
 
@@ -69,15 +72,29 @@ class StreamingTtsProxyEntity(TextToSpeechEntity):
             "name": config_entry.title,
         }
         self._voices_loaded = False
-        self._attr_supported_languages: list[str] = []
+        self._attr_supported_languages: list[str] =[]
         self._store: Store[VoiceCache] = Store(hass, CACHE_VERSION, f"{DOMAIN}_voices_{config_entry.entry_id}")
 
+    async def async_load_from_cache(self) -> None:
+        """Load voices from cache to immediately announce capabilities to HA."""
+        if (cached_data := await self._store.async_load()):
+            self._voices = {
+                lang:[Voice(v["voice_id"], v["name"]) for v in v_list]
+                for lang, v_list in cached_data["voices"].items()
+            }
+            self._attr_supported_languages = cached_data["languages"]
+            self._voices_loaded = True
+            _LOGGER.info(
+                "Successfully loaded %d voices for %s from cache during setup.",
+                sum(len(v) for v in self._voices.values()),
+                self.name,
+            )
 
     async def async_added_to_hass(self) -> None:
         """Handle entity which will be added to HA. Start background tasks here."""
         await super().async_added_to_hass()
-        self._processor._on_primary_connect_callback = self.trigger_voice_reload
         _LOGGER.info("Scheduling initial load of voices and capabilities for %s...", self.name)
+        # В фоне пробуем обновить кэш от свежего сервера
         self.hass.async_create_task(self.async_load_voices())
 
     async def trigger_voice_reload(self) -> None:
@@ -87,13 +104,14 @@ class StreamingTtsProxyEntity(TextToSpeechEntity):
 
     async def async_load_voices(self) -> None:
         """
-        Load voices from the server, save to cache. On failure, load from cache.
+        Load voices from the server, save to cache.
         """
         _LOGGER.debug("Attempting to load voices and capabilities for %s", self.name)
         try:
             server_info: ServerInfo = await self._api_client.get_server_info()
-
-            self._processor.primary_supports_streaming = server_info.supports_streaming
+            
+            if hasattr(self._processor, "_on_primary_connect_callback"):
+                 self._processor._on_primary_connect_callback = self.trigger_voice_reload
 
             voice_languages: set[str] = set()
             new_voices_map: dict[str, list[Voice]] = defaultdict(list)
@@ -113,29 +131,21 @@ class StreamingTtsProxyEntity(TextToSpeechEntity):
             _LOGGER.info("Successfully loaded %d voices for %s from server.", len(server_info.voices), self.name)
 
             cache_data: VoiceCache = {
-                "voices": {lang: [{'voice_id': v.voice_id, 'name': v.name} for v in v_list] for lang, v_list in self._voices.items()},
+                "voices": {lang:[{'voice_id': v.voice_id, 'name': v.name} for v in v_list] for lang, v_list in self._voices.items()},
                 "languages": self._attr_supported_languages,
             }
             await self._store.async_save(cache_data)
             _LOGGER.debug("Voice cache saved for %s", self.name)
 
         except (CannotConnect, NoVoicesFound) as e:
-            _LOGGER.warning("Could not load voices from primary server for %s: %s. Attempting to load from cache.", self.name, e)
-            
-            if (cached_data := await self._store.async_load()):
-                self._voices = {
-                    lang: [Voice(v["voice_id"], v["name"]) for v in v_list]
-                    for lang, v_list in cached_data["voices"].items()
-                }
-                self._attr_supported_languages = cached_data["languages"]
-                self._voices_loaded = True
-                _LOGGER.info("Successfully loaded %d voices for %s from cache.", sum(len(v) for v in self._voices.values()), self.name)
-            else:
-                _LOGGER.warning("Voice cache not found. TTS for %s will be unavailable until the primary server is connected.", self.name)
+            _LOGGER.debug("Could not load voices from primary server for %s: %s.", self.name, e)
+            if not self._voices_loaded:
+                _LOGGER.warning("Voice cache not found and server is offline. TTS for %s will be unavailable until connected.", self.name)
                 self._voices.clear()
-                self._attr_supported_languages = []
+                self._attr_supported_languages =[]
                 self._voices_loaded = False
         
+        # Обновляем стейт сущности на случай, если голоса всё же изменились
         self.async_write_ha_state()
 
     @property
@@ -152,7 +162,7 @@ class StreamingTtsProxyEntity(TextToSpeechEntity):
 
     @property
     def supported_options(self) -> list[str]:
-        return [ATTR_VOICE, ATTR_SPEAKER]
+        return[ATTR_VOICE, ATTR_SPEAKER]
 
     @callback
     def async_get_supported_voices(self, language: str) -> list[Voice] | None:
@@ -164,7 +174,9 @@ class StreamingTtsProxyEntity(TextToSpeechEntity):
         async def single_message_stream():
             yield message
 
-        audio_generator = self._processor.async_process_stream(single_message_stream(), voice_name)
+        audio_generator = self._processor.async_process_stream(
+            single_message_stream(), voice_name, language
+        )
         
         all_chunks = [chunk async for chunk in audio_generator]
         return "wav", b"".join(all_chunks)
@@ -174,5 +186,7 @@ class StreamingTtsProxyEntity(TextToSpeechEntity):
         
         return TTSAudioResponse(
             extension="wav",
-            data_gen=self._processor.async_process_stream(request.message_gen, voice_name)
+            data_gen=self._processor.async_process_stream(
+                request.message_gen, voice_name, request.language
+            )
         )

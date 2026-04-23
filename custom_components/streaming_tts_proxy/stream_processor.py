@@ -4,7 +4,7 @@ import re
 import struct
 from typing import AsyncIterable, Optional, Callable, Awaitable
 
-from wyoming.event import async_read_event, async_write_event
+from wyoming.event import async_read_event, async_write_event, Event
 from wyoming.tts import (
     Synthesize,
     SynthesizeVoice,
@@ -15,7 +15,7 @@ from wyoming.tts import (
 )
 from wyoming.audio import AudioChunk, AudioStart, AudioStop
 
-from .const import TIMEOUT_SECONDS, DEFAULT_FALLBACK_SAMPLE_RATE
+from .const import TIMEOUT_SECONDS
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -24,7 +24,6 @@ CONNECTION_TIMEOUT = 0.064
 
 def create_wav_header(sample_rate: int, bits_per_sample: int, channels: int, data_size: int = 0) -> bytes:
     """Creates a WAV header for streaming."""
-    # For streaming, we use 0xFFFFFFFF for chunk sizes
     chunk_size = 36 + data_size if data_size > 0 else 0xFFFFFFFF
     final_data_size = data_size if data_size > 0 else 0xFFFFFFFF
     
@@ -37,8 +36,8 @@ def create_wav_header(sample_rate: int, bits_per_sample: int, channels: int, dat
         chunk_size,
         b"WAVE",
         b"fmt ",
-        16,          # Sub-chunk 1 size (16 for PCM)
-        1,           # Audio format (1 for PCM)
+        16,
+        1,
         channels,
         sample_rate,
         byte_rate,
@@ -52,111 +51,79 @@ def create_wav_header(sample_rate: int, bits_per_sample: int, channels: int, dat
 class StreamProcessor:
     def __init__(
         self,
-        primary_supports_streaming: bool,
-        fallback_supports_streaming: bool,
-        tts_host: str,
-        tts_port: int,
-        sample_rate: int,
-        fallback_tts_host: Optional[str] = None,
-        fallback_tts_port: Optional[int] = None,
-        fallback_voice: Optional[str] = None,
-        fallback_sample_rate: Optional[int] = None,
+        servers: list[dict],
         on_primary_connect_callback: Optional[Callable[[], Awaitable[None]]] = None,
     ):
-        self.primary_supports_streaming = primary_supports_streaming
-        self.fallback_supports_streaming = fallback_supports_streaming
-        self.tts_host = tts_host
-        self.tts_port = tts_port
-        self.sample_rate = sample_rate
-        self.fallback_tts_host = fallback_tts_host
-        self.fallback_tts_port = fallback_tts_port
-        self.fallback_voice = fallback_voice
-        self.fallback_sample_rate = fallback_sample_rate or DEFAULT_FALLBACK_SAMPLE_RATE
+        self.servers = servers
         self._on_primary_connect_callback = on_primary_connect_callback
 
-
     async def async_process_stream(
-        self, text_stream: AsyncIterable[str], voice_name: str
+        self, text_stream: AsyncIterable[str], voice_name: str, language: str
     ) -> AsyncIterable[bytes]:
-        """
-        Attempts to connect to the primary server quickly. If it fails,
-        it immediately tries the fallback server. The processing mode (native
-        or sentence-based) is chosen based on the capabilities of the
-        successfully connected server.
-        """
-        target_server = None
+        target_server_conn = None
+        last_error = None
 
-        try:
-            _LOGGER.debug("Quick-checking PRIMARY server %s:%s", self.tts_host, self.tts_port)
-            reader, writer = await asyncio.wait_for(
-                asyncio.open_connection(self.tts_host, self.tts_port),
-                timeout=CONNECTION_TIMEOUT,
-            )
-            target_server = {
-                "reader": reader, "writer": writer, "host": self.tts_host,
-                "port": self.tts_port, "sample_rate": self.sample_rate,
-                "voice": voice_name, "is_primary": True,
-            }
-            _LOGGER.debug("PRIMARY server is alive. Proceeding.")
-        except (ConnectionRefusedError, asyncio.TimeoutError, OSError) as e:
-            _LOGGER.debug("Quick-check for PRIMARY server failed: %s. Trying fallback.", e)
-
-        if target_server is None:
-            if not self.fallback_tts_host or not self.fallback_tts_port:
-                _LOGGER.error("Primary server failed and no fallback is configured.")
-                raise ConnectionRefusedError("Primary TTS server is unavailable and no fallback is configured.")
+        for server_config in self.servers:
             try:
-                _LOGGER.debug("Quick-checking FALLBACK server %s:%s", self.fallback_tts_host, self.fallback_tts_port)
+                _LOGGER.debug("Checking %s server %s:%s", 
+                              server_config.get("name", "Unknown"), 
+                              server_config["host"], 
+                              server_config["port"])
+                
                 reader, writer = await asyncio.wait_for(
-                    asyncio.open_connection(self.fallback_tts_host, self.fallback_tts_port),
+                    asyncio.open_connection(server_config["host"], server_config["port"]),
                     timeout=CONNECTION_TIMEOUT,
                 )
-                target_server = {
-                    "reader": reader, "writer": writer, "host": self.fallback_tts_host,
-                    "port": self.fallback_tts_port, "sample_rate": self.fallback_sample_rate,
-                    "voice": self.fallback_voice, "is_primary": False,
+                
+                target_server_conn = {
+                    "reader": reader,
+                    "writer": writer,
+                    "host": server_config["host"],
+                    "port": server_config["port"],
+                    "sample_rate": server_config["sample_rate"],
+                    "voice": voice_name if server_config.get("is_primary") else server_config.get("voice"),
+                    "is_primary": server_config.get("is_primary", False),
+                    "supports_streaming": server_config["supports_streaming"],
                 }
-                _LOGGER.debug("FALLBACK server is alive. Proceeding.")
+                
+                _LOGGER.debug("%s server %s:%s is alive. Proceeding.",
+                              server_config.get("name", "Unknown"), 
+                              server_config["host"],
+                              server_config["port"])
+                break
+            
             except (ConnectionRefusedError, asyncio.TimeoutError, OSError) as e:
-                _LOGGER.error("Fallback server also failed to connect: %s", e)
-                raise ConnectionRefusedError("Both primary and fallback TTS servers are unavailable.")
+                _LOGGER.debug("Check for %s server %s:%s failed: %s. Trying next.",
+                              server_config.get("name", "Unknown"),
+                              server_config["host"],
+                              server_config["port"], e)
+                last_error = e
+
+        if target_server_conn is None:
+            _LOGGER.error("All configured TTS servers failed to connect. Last error: %s", last_error)
+            raise ConnectionRefusedError("All configured TTS servers are unavailable.") from last_error
 
         try:
-            should_use_native_stream = (
-                target_server["is_primary"] and self.primary_supports_streaming
-            ) or (
-                not target_server["is_primary"] and self.fallback_supports_streaming
-            )
+            should_use_native_stream = target_server_conn["supports_streaming"]
 
             if should_use_native_stream:
-                _LOGGER.debug(
-                    "Dispatching to NATIVE stream for %s server.",
-                    "primary" if target_server["is_primary"] else "fallback"
-                )
-                async for chunk in self._stream_native_to_target(text_stream, target_server):
+                _LOGGER.debug("Dispatching to NATIVE stream for primary server.")
+                async for chunk in self._stream_native_to_target(text_stream, target_server_conn, language):
                     yield chunk
             else:
-                _LOGGER.debug(
-                    "Dispatching to SENTENCE-BASED stream for %s server.",
-                    "primary" if target_server["is_primary"] else "fallback"
-                )
-                async for chunk in self._stream_by_sentence_to_target(text_stream, target_server):
+                _LOGGER.debug("Dispatching to SENTENCE-BASED stream for primary server.")
+                async for chunk in self._stream_by_sentence_to_target(text_stream, target_server_conn, language):
                     yield chunk
         finally:
-            if target_server and target_server["writer"]:
-                target_server["writer"].close()
+            if target_server_conn and target_server_conn["writer"]:
+                target_server_conn["writer"].close()
                 try:
-                    await target_server["writer"].wait_closed()
+                    await target_server_conn["writer"].wait_closed()
                 except Exception:
                     pass
-            _LOGGER.debug("Stream processing finished for %s:%s.", target_server['host'], target_server['port'])
+            _LOGGER.debug("Stream processing finished for %s:%s.", target_server_conn['host'], target_server_conn['port'])
 
-
-    async def _stream_native_to_target(self, text_gen: AsyncIterable[str], server_info: dict) -> AsyncIterable[bytes]:
-            """
-            Robust native streaming that correctly handles both continuous
-            and intermittent audio responses (with audiostop).
-            """
+    async def _stream_native_to_target(self, text_gen: AsyncIterable[str], server_info: dict, language: str) -> AsyncIterable[bytes]:
             reader = server_info["reader"]
             writer = server_info["writer"]
             
@@ -168,8 +135,19 @@ class StreamProcessor:
                 async def _write_text_stream():
                     """Writes text chunks to the server in a fire-and-forget background task."""
                     try:
-                        voice = SynthesizeVoice(name=server_info["voice"]) if server_info["voice"] else None
-                        await async_write_event(SynthesizeStart(voice=voice).event(), writer)
+                        # --- ИСПРАВЛЕНО: Собираем словарь вручную, чтобы обойти баг Wyoming ---
+                        voice_data = {}
+                        if server_info.get("voice"):
+                            voice_data["name"] = server_info["voice"]
+                        if language:
+                            voice_data["language"] = language
+                        
+                        # Создаем базовое событие Event с уже готовым словарем
+                        start_event = Event(type="synthesize-start", data={"voice": voice_data})
+                        # --- КОНЕЦ ИСПРАВЛЕНИЯ ---
+
+                        await async_write_event(start_event, writer)
+
                         async for text_chunk in text_gen:
                             await async_write_event(SynthesizeChunk(text=text_chunk).event(), writer)
                             await asyncio.sleep(0)
@@ -180,7 +158,6 @@ class StreamProcessor:
                         _LOGGER.exception("Unexpected error while writing to TTS client")
 
                 writer_task = asyncio.create_task(_write_text_stream())
-
                 header_sent = False
                 
                 while event := await async_read_event(reader):
@@ -188,14 +165,11 @@ class StreamProcessor:
                         if not header_sent:
                             yield create_wav_header(server_info["sample_rate"], 16, 1)
                             header_sent = True
-
                     elif AudioChunk.is_type(event.type):
                         yield AudioChunk.from_event(event).audio
-
                     elif AudioStop.is_type(event.type):
                         _LOGGER.debug("Received intermediate AudioStop, continuing stream.")
                         continue
-
                     elif SynthesizeStopped.is_type(event.type):
                         _LOGGER.debug("Received final SynthesizeStopped, ending stream.")
                         break
@@ -209,62 +183,39 @@ class StreamProcessor:
                     writer_task.cancel()
                     await asyncio.sleep(0)
 
-
-    async def _stream_by_sentence_to_target(self, text_stream: AsyncIterable[str], server_info: dict) -> AsyncIterable[bytes]:
-        """
-        Core logic for sentence-based streaming to a single server.
-        """
+    async def _stream_by_sentence_to_target(self, text_stream: AsyncIterable[str], server_info: dict, language: str) -> AsyncIterable[bytes]:
         reader = server_info["reader"]
         writer = server_info["writer"]
-
         yield create_wav_header(server_info["sample_rate"], 16, 1)
-
         if server_info["is_primary"] and self._on_primary_connect_callback:
             asyncio.create_task(self._on_primary_connect_callback())
         
         text_buffer = ""
-
-        # Main loop: its task is to accumulate text from the stream.
         async for text_chunk in text_stream:
             text_buffer += text_chunk
-
             while True:
                 sentence, rest = self._form_sentence(text_buffer)
-                
                 if sentence:
-                    # If a complete sentence is found, we send it for synthesis.
-                    async for audio_chunk in self._synthesize_sentence(reader, writer, sentence, server_info["voice"]):
+                    async for audio_chunk in self._synthesize_sentence(reader, writer, sentence, server_info["voice"], language):
                         yield audio_chunk
-                    
-                    # We update the buffer, leaving only the tail in it.
                     text_buffer = rest
                 else:
                     break
-
-        # This code will be executed after the outer loop completes.
         final_text = text_buffer.strip()
         if final_text:
-            async for audio_chunk in self._synthesize_sentence(reader, writer, final_text, server_info["voice"]):
+            async for audio_chunk in self._synthesize_sentence(reader, writer, final_text, server_info["voice"], language):
                 yield audio_chunk
     
     def _form_sentence(self, buffer_text: str) -> tuple[str, str]:
-        """Splits text into a sentence and the remainder."""
-        if not buffer_text:
-            return "", ""
-
-        # Use a placeholder for decimals to avoid splitting on them
+        if not buffer_text: return "", ""
         DECIMAL_PLACEHOLDER = "##DEC##"
         safe_text = re.sub(r'(\d)\.(\d)', fr'\1{DECIMAL_PLACEHOLDER}\2', buffer_text)
-
-        # Split by common sentence terminators
         match = re.search(r"[.!?।。]", safe_text)
         if match:
             end_index = match.start() + 1
             sentence_part = safe_text[:end_index].replace(DECIMAL_PLACEHOLDER, '.')
             rest_part = safe_text[end_index:].replace(DECIMAL_PLACEHOLDER, '.')
             return sentence_part.strip(), rest_part.strip()
-
-        # Fallback for long text without terminators: split by last space before a limit
         max_chars = 250
         if len(safe_text) > max_chars:
             search_area = safe_text[:max_chars + 20]
@@ -273,25 +224,25 @@ class StreamProcessor:
                 sentence_part = safe_text[:last_space_index].replace(DECIMAL_PLACEHOLDER, '.')
                 rest_part = safe_text[last_space_index:].replace(DECIMAL_PLACEHOLDER, '.')
                 return sentence_part.strip(), rest_part.strip()
-            
-            # If no space is found, just cut at the max length
             sentence_part = safe_text[:max_chars].replace(DECIMAL_PLACEHOLDER, '.')
             rest_part = safe_text[max_chars:].replace(DECIMAL_PLACEHOLDER, '.')
             return sentence_part, rest_part
-
-        # If no sentence can be formed yet, return the buffer as is
         return "", buffer_text
     
-    async def _synthesize_sentence(self, reader, writer, text, voice_name) -> AsyncIterable[bytes]:
-        """Synthesizes a single sentence using the legacy Synthesize event."""
+    async def _synthesize_sentence(self, reader, writer, text, voice_name, language: str) -> AsyncIterable[bytes]:
         clean_text = text.strip()
-        if not clean_text or not re.search(r'\w', clean_text): # Ignore empty/whitespace-only
-            return
+        if not clean_text or not re.search(r'\w', clean_text): return
 
-        synthesize_event = Synthesize(
-            text=clean_text,
-            voice=SynthesizeVoice(name=voice_name) if voice_name else None
-        ).event()
+        # --- ИСПРАВЛЕНО: Собираем словарь вручную, чтобы обойти баг Wyoming ---
+        voice_data = {}
+        if voice_name:
+            voice_data["name"] = voice_name
+        if language:
+            voice_data["language"] = language
+
+        # Создаем базовое событие Event с уже готовым словарем
+        synthesize_event = Event(type="synthesize", data={"text": clean_text, "voice": voice_data})
+        # --- КОНЕЦ ИСПРАВЛЕНИЯ ---
 
         await async_write_event(synthesize_event, writer)
         
@@ -301,8 +252,6 @@ class StreamProcessor:
             except asyncio.TimeoutError:
                 _LOGGER.warning(f"[SENTENCE-SINGLE] Timeout waiting for audio for text: '{text[:50]}...'")
                 break
-            
-            if event is None or AudioStop.is_type(event.type):
-                break
+            if event is None or AudioStop.is_type(event.type): break
             if AudioChunk.is_type(event.type):
                 yield AudioChunk.from_event(event).audio
