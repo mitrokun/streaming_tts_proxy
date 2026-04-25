@@ -47,6 +47,8 @@ async def async_setup_entry(
 
     entity = StreamingTtsProxyEntity(hass, config_entry, processor, api_client)
     
+    # 💡 ВАЖНО: Загружаем кэш ДО регистрации сущности в HA.
+    # Теперь при старте ассистенты сразу увидят поддерживаемые языки.
     await entity.async_load_from_cache()
 
     async_add_entities([entity])

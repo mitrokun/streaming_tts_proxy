@@ -22,12 +22,10 @@ async def async_setup_entry(
     """Set up the TXT Reader progress sensor."""
     
     if hass.data[DOMAIN].get("progress_sensor_created"):
-        _LOGGER.debug("Global progress sensor already created, skipping for %s", entry.title)
         return
 
     store = hass.data[DOMAIN].get("store")
     if not store:
-        _LOGGER.error("AudiobookStore not initialized")
         return
 
     hass.data[DOMAIN]["progress_sensor_created"] = True
@@ -54,9 +52,14 @@ class TxtReaderProgressSensor(SensorEntity):
         data = self._store._data
         books_attr = {}
         
-        for path, block in data.items():
-            name = os.path.basename(path).replace(".txt", "").capitalize()
-            books_attr[name] = block
+        for path, block_data in data.items():
+
+            name = os.path.basename(path).replace(".txt", "")
+            
+            books_attr[name] = {
+                "current": block_data.get("index", 0),
+                "total": block_data.get("total_blocks", 0)
+            }
 
         self._attr_extra_state_attributes = {"books": books_attr}
 

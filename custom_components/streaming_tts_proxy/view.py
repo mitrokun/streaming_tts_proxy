@@ -41,7 +41,7 @@ class TxtReaderStreamView(HomeAssistantView):
             return web.Response(status=404, text="Expired session")
             
         if session.get("expired"):
-            # 410 Gone означает, что ресурс был, но навсегда заменен/отменен
+            # 410 Gone means the resource was available but has been permanently replaced/cancelled.
             return web.Response(status=410, text="Session superseded by a new play request")
 
         session["last_accessed"] = time.time()
@@ -56,7 +56,6 @@ class TxtReaderStreamView(HomeAssistantView):
         initial_burst_seconds = 15.0 
         GRACE_PERIOD_SECONDS = 7.0 
 
-        # Вытягиваем старт-индекс, при переподключении к сессии будем читать из store
         start_index = session.get("start_index", store.get_progress(file_path))
         session.pop("start_index", None)
         
@@ -67,7 +66,6 @@ class TxtReaderStreamView(HomeAssistantView):
         response.content_type = "audio/wav"
         await response.prepare(request)
 
-        # Используем asyncio.Event вместо словаря
         stop_event = asyncio.Event()
         ready_blocks = asyncio.Queue(maxsize=1)
 
@@ -78,7 +76,7 @@ class TxtReaderStreamView(HomeAssistantView):
             return p_state is not None and p_state.state in ACTIVE_STATES
 
         async def text_feeder():
-            """Фоновый синтез: запрашивает у Proxy по одному блоку."""
+            """Background synthesis: requests one block at a time from the Proxy."""
             try:
                 for i in range(start_index, len(chunks)):
                     if stop_event.is_set() or session.get("expired"): break
@@ -144,7 +142,8 @@ class TxtReaderStreamView(HomeAssistantView):
                 while playback_timeline and real_elapsed > playback_timeline[0][1]:
                     finished_idx, _ = playback_timeline.pop(0)
                     current_playing_idx = finished_idx + 1
-                    store.save_progress(file_path, current_playing_idx)
+                    # ИСПРАВЛЕНИЕ 1: Передаем len(chunks) как total_blocks
+                    store.save_progress(file_path, current_playing_idx, len(chunks))
                     session["current_block"] = current_playing_idx
 
                 pause_started_at = time.time()
@@ -219,7 +218,6 @@ class TxtReaderStreamView(HomeAssistantView):
         except (ConnectionResetError, asyncio.CancelledError): pass
 
         finally:
-
             stop_event.set()
             if not feeder_task.done(): 
                 feeder_task.cancel()
@@ -235,9 +233,10 @@ class TxtReaderStreamView(HomeAssistantView):
                 is_finished = True
 
             if is_finished:
-                _LOGGER.info("Book finished, removing from progress store.")
+                _LOGGER.info("Book finished, removing from progress store and expiring session.")
                 store.delete_progress(file_path)
+                session["expired"] = True
             else:
-                store.save_progress(file_path, current_playing_idx)
+                store.save_progress(file_path, current_playing_idx, len(chunks))
         
         return response

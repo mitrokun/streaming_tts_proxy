@@ -48,7 +48,6 @@ def get_book_chunks(file_path: str, max_len: int) -> list[str]:
                     chunks.append(" ".join(temp_sent_buf))
                 continue
 
-            # Если добавление текущей строки превысит лимит блока
             if current_len + len(line) + 1 > max_len:
                 # Сохраняем накопленный блок
                 chunks.append("\n".join(current_buffer))
@@ -71,7 +70,7 @@ def get_book_chunks(file_path: str, max_len: int) -> list[str]:
 
 def create_wav_header(sample_rate: int, bits_per_sample: int, channels: int) -> bytes:
     import struct
-    # 0xFFFFFFFF указывает на неопределенную длину (стриминг)
+
     chunk_size = 0xFFFFFFFF
     data_size = 0xFFFFFFFF
     
