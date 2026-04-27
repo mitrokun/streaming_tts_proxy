@@ -142,7 +142,7 @@ class TxtReaderStreamView(HomeAssistantView):
                 while playback_timeline and real_elapsed > playback_timeline[0][1]:
                     finished_idx, _ = playback_timeline.pop(0)
                     current_playing_idx = finished_idx + 1
-                    # ИСПРАВЛЕНИЕ 1: Передаем len(chunks) как total_blocks
+
                     store.save_progress(file_path, current_playing_idx, len(chunks))
                     session["current_block"] = current_playing_idx
 
