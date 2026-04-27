@@ -49,9 +49,9 @@ def get_book_chunks(file_path: str, max_len: int) -> list[str]:
                 continue
 
             if current_len + len(line) + 1 > max_len:
-                # Сохраняем накопленный блок
+
                 chunks.append("\n".join(current_buffer))
-                # Начинаем новый блок с текущей строки
+
                 current_buffer = [line]
                 current_len = len(line)
             else:

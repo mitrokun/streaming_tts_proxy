@@ -115,9 +115,20 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         
         for sid in list(sessions.keys()):
             sess = sessions[sid]
+            # Cleaning up inactive sessions (12h+)
             if now - sess.get("last_accessed", now) > 43200: 
                 sessions.pop(sid, None)
+            
+            # If the target player has already played txt, we kill his old session
             elif sess.get("player_id") == player_id:
+                sess["expired"] = True
+                
+            # If this book is already playing on another player — kill session
+            elif sess.get("file_path") == file_path:
+                _LOGGER.info(
+                    "Book %s is being transferred to %s. Stopping previous session on %s.", 
+                    book_title, player_id, sess.get("player_id")
+                )
                 sess["expired"] = True
 
         session_id = uuid.uuid4().hex
