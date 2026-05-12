@@ -6,7 +6,6 @@ import logging
 _LOGGER = logging.getLogger(__name__)
 
 def get_book_chunks(file_path: str, max_len: int) -> list[str]:
-    """Splits text into larger blocks, grouping short paragraphs together."""
     if not os.path.exists(file_path):
         _LOGGER.error("File not found: %s", file_path)
         return []
@@ -15,54 +14,59 @@ def get_book_chunks(file_path: str, max_len: int) -> list[str]:
         with open(file_path, "r", encoding="utf-8") as f:
             text = f.read()
             
-        raw_lines = [line.strip() for line in text.split('\n') if line.strip()]
+        text = text.replace('\r\n', '\n')
+        # Не более 4 переносов строк подряд
+        text = re.sub(r'\n{5,}', '\n\n\n\n', text)
+        
+        # Разрезаем, сохраняя группы \n как отдельные элементы
+        parts = re.split(r'(\n+)', text)
         
         chunks = []
-        current_buffer = []
-        current_len = 0
+        current_chunk = ""
 
-        for line in raw_lines:
-
-            if len(line) > max_len:
-
-                if current_buffer:
-                    chunks.append("\n".join(current_buffer))
-                    current_buffer = []
-                    current_len = 0
-                
-                sentences = re.split(r'(?<=[.!?…])\s+', line)
-                temp_sent_buf = []
-                temp_sent_len = 0
-                
-                for sent in sentences:
-                    if temp_sent_len + len(sent) > max_len:
-                        if temp_sent_buf:
-                            chunks.append(" ".join(temp_sent_buf))
-                        temp_sent_buf = [sent]
-                        temp_sent_len = len(sent)
-                    else:
-                        temp_sent_buf.append(sent)
-                        temp_sent_len += len(sent)
-                
-                if temp_sent_buf:
-                    chunks.append(" ".join(temp_sent_buf))
+        for part in parts:
+            if part.startswith('\n'):
+                # Если перенос влезает
+                if len(current_chunk) + len(part) <= max_len:
+                    current_chunk += part
+                else:
+                    # Если не влезает — сохраняем старый чанк, 
+                    # а ПЕРЕНОС СТРОКИ делаем началом нового чанка
+                    if current_chunk:
+                        chunks.append(current_chunk)
+                    current_chunk = part 
                 continue
 
-            if current_len + len(line) + 1 > max_len:
+            content = part # Не делаем .strip() здесь, чтобы не терять пробелы форматирования
+            
+            if len(content) > max_len:
+                if current_chunk:
+                    chunks.append(current_chunk)
+                    current_chunk = ""
+                
+                # Дробим длинный текст по предложениям
+                sentences = re.split(r'(?<=[.!?…])\s+', content)
+                temp_sent = ""
+                for sent in sentences:
+                    if len(temp_sent) + len(sent) + 1 > max_len:
+                        if temp_sent: chunks.append(temp_sent)
+                        temp_sent = sent
+                    else:
+                        temp_sent += " " + sent if temp_sent else sent
+                current_chunk = temp_sent
+                continue
 
-                chunks.append("\n".join(current_buffer))
-
-                current_buffer = [line]
-                current_len = len(line)
+            if len(current_chunk) + len(content) > max_len:
+                if current_chunk:
+                    chunks.append(current_chunk)
+                current_chunk = content
             else:
-                current_buffer.append(line)
-                current_len += len(line) + 1 # +1 для учета переноса строки
+                current_chunk += content
 
-        if current_buffer:
-            chunks.append("\n".join(current_buffer))
+        if current_chunk:
+            chunks.append(current_chunk)
 
-        _LOGGER.debug("Text split into %s smart chunks", len(chunks))
-        return chunks
+        return [c for c in chunks if c.strip()]
 
     except Exception as e:
         _LOGGER.error("Error splitting book: %s", e)

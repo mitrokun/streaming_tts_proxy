@@ -1,5 +1,5 @@
 play:
-  name: "Txt to Stream"
+  name: "Txt Cast"
   description: "Reads a text file using the Streaming TTS Proxy."
   fields:
     config_entry:
@@ -18,10 +18,12 @@ play:
           domain: media_player
     file_path:
       name: "File Path"
-      description: "Full path to book.txt (e.g. /media/book.txt)."
+      description: "File from Txt Cast or full path to book (e.g. /media/book.txt)."
       required: true
       selector:
-        text: {}
+        media:
+          accept:
+            - audio/*
     voice:
       name: "Voice"
       description: "Override default voice (optional)."

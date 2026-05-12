@@ -3,6 +3,7 @@ import uuid
 import time
 import os
 import voluptuous as vol
+from pathlib import Path
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, ServiceCall
@@ -84,7 +85,43 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         if call.data.get("voice"): config["voice"] = call.data["voice"]
         
         player_id = call.data["entity_id"]
-        file_path = call.data["file_path"]
+        
+        raw_input = call.data.get("file_path")
+        
+        # 1. Extract the file path (handles both GUI dict from media selector and direct string input)
+        if isinstance(raw_input, dict):
+            file_path = raw_input.get("media_content_id", "")
+        else:
+            file_path = str(raw_input)
+
+        if not file_path:
+            _LOGGER.error("No file path provided")
+            return
+
+        # 2. Resolve media-source URI to an absolute file system path
+        if file_path.startswith("media-source://"):
+            # Expected format: media-source://domain/source_dir_id/relative/path.txt
+            path_parts = file_path.replace("media-source://", "").split("/", 2)
+            
+            if len(path_parts) >= 3:
+                source_dir_id = path_parts[1]
+                relative_path = path_parts[2]
+                
+                media_dirs = hass.config.media_dirs
+                if source_dir_id in media_dirs:
+                    file_path = str(Path(media_dirs[source_dir_id]) / relative_path)
+                else:
+                    _LOGGER.error("Media directory '%s' not found in Home Assistant config", source_dir_id)
+                    return
+            else:
+                _LOGGER.error("Invalid media-source URI format: %s", file_path)
+                return
+
+        # 3. Verify physical file existence
+        if not os.path.exists(file_path):
+            _LOGGER.error("File not found on disk: %s", file_path)
+            return
+
         manual_idx = call.data.get("block_index")
         
         timer_min = call.data.get("timer", 0)
@@ -147,9 +184,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
         await hass.services.async_call("media_player", "play_media", {
             "entity_id": player_id,
-            "media_content_id": f"{get_url(hass)}/api/{DOMAIN}/stream/{session_id}",
+            # .wav for ya.station support
+            "media_content_id": f"{get_url(hass)}/api/{DOMAIN}/stream/{session_id}.wav",
             "media_content_type": "music",
-            "extra": {"title": book_title, "artist": "TXT Reader TTS"}
+            "extra": {"title": book_title, "artist": "TXT Reader"}
         })
 
     async def handle_resume(call: ServiceCall):
@@ -193,7 +231,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             schema=vol.Schema({
                 vol.Required("config_entry"): cv.string,
                 vol.Required("entity_id"): cv.entity_id,
-                vol.Required("file_path"): cv.string,
+                vol.Required("file_path"): vol.Any(cv.string, dict),
                 vol.Optional("voice"): cv.string,
                 vol.Optional("block_index"): cv.positive_int,
                 vol.Optional("timer"): cv.positive_int,

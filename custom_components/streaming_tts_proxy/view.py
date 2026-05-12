@@ -18,21 +18,21 @@ MAX_PAUSE_TIMEOUT = 3600  # 1 час
 class TxtReaderStreamView(HomeAssistantView):
     """View to stream audio with precise timeline tracking and failover proxy."""
 
-    url = f"/api/{DOMAIN}/stream/{{session_id}}"
+    url = f"/api/{DOMAIN}/stream/{{session_id:[^.]+}}{{ext:.*}}"
     name = f"api:{DOMAIN}:stream"
     requires_auth = False
 
     def __init__(self, hass):
         self.hass = hass
 
-    async def head(self, request, session_id):
+    async def head(self, request, session_id, **kwargs):
         """Handle HEAD request for FFmpeg probing."""
         sessions = self.hass.data[DOMAIN].get("sessions", {})
         if session_id not in sessions:
             return web.Response(status=404)
         return web.Response(content_type="audio/wav")
 
-    async def get(self, request, session_id):
+    async def get(self, request, session_id, **kwargs):
         """Handle GET request for audio streaming."""
         sessions = self.hass.data[DOMAIN].get("sessions", {})
         session = sessions.get(session_id)
@@ -142,7 +142,7 @@ class TxtReaderStreamView(HomeAssistantView):
                 while playback_timeline and real_elapsed > playback_timeline[0][1]:
                     finished_idx, _ = playback_timeline.pop(0)
                     current_playing_idx = finished_idx + 1
-
+                    # ИСПРАВЛЕНИЕ 1: Передаем len(chunks) как total_blocks
                     store.save_progress(file_path, current_playing_idx, len(chunks))
                     session["current_block"] = current_playing_idx
 
