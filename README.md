@@ -8,7 +8,7 @@
 
 
 - By the way, streaming response does not create a cache (long-term as a file, but temporary is still present, e.g. to be able to debug). To further reduce disk activity, I made a fix for Piper that disables the intermediate stage of creating a wav file; instead, it immediately returns a stream of raw data. Thus, all actions within a voice request are processed in memory.
-- Для русскоязычной аудитории есть [комплексная модификация](https://github.com/mitrokun/espeak-ng-data), с контролем ударений и прочими модификациями. Подробности по ссылке.
+- Для русскоязычной аудитории есть [комплексная модификация](https://github.com/mitrokun/espeak-ng-data), с контролем ударений и прочими ухищрениями. Подробности по ссылке.
 
 #### A few [diagrams](https://github.com/mitrokun/streaming_tts_proxy/blob/main/DIAGRAM.md)
 
