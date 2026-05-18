@@ -1,0 +1,81 @@
+play:
+  name: "Txt Cast"
+  description: "Reads a text file using the Streaming TTS Proxy."
+  fields:
+    config_entry:
+      name: "TTS Instance"
+      description: "Select the Streaming TTS Proxy integration instance to use."
+      required: true
+      selector:
+        config_entry:
+          integration: streaming_tts_proxy
+    entity_id:
+      name: "Media Player"
+      description: "Target player(s)."
+      required: true
+      selector:
+        entity:
+          domain: media_player
+    file_path:
+      name: "File Path"
+      description: "File from Txt Cast or full path to book (e.g. /media/book.txt)."
+      required: true
+      selector:
+        media:
+          accept:
+            - audio/*
+    voice:
+      name: "Voice"
+      description: "Override default voice (optional)."
+      required: false
+      selector:
+        text: {}
+    block_index:
+      name: "Start Block Index"
+      description: "Optional: Start from a specific block number (0 for beginning)."
+      required: false
+      selector:
+        number:
+          min: 0
+          max: 99999
+          mode: box
+    timer:
+      name: "Sleep Timer"
+      description: "Time in minutes to play before stopping automatically."
+      required: false
+      selector:
+        number:
+          min: 1
+          max: 480
+          unit_of_measurement: "min"
+          mode: box
+resume:
+  name: "Resume Last Book"
+  description: "Resumes playback of the last book on the selected player using its saved voice and instance settings."
+  fields:
+    entity_id:
+      name: "Media Player"
+      description: "The media player to resume playback on."
+      required: true
+      selector:
+        entity:
+          domain: media_player
+    file_path:
+      name: "File Path"
+      description: "Path to a specific book. If omitted, the last played book across all devices will be used."
+      required: false
+      selector:
+        text: {}
+    timer:
+      name: "Sleep Timer"
+      description: "Optional: Time in minutes to play before stopping automatically."
+      required: false
+      selector:
+        number:
+          min: 1
+          max: 480
+          unit_of_measurement: "min"
+          mode: box
+clear_history:
+  name: "Clear Progress History"
+  description: "Completely deletes progress history for all books."

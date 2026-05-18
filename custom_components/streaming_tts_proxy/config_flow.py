@@ -1,3 +1,4 @@
+"""Config flow for Streaming TTS Proxy."""
 import logging
 from typing import Any
 
@@ -28,12 +29,19 @@ from .const import (
     CONF_FALLBACK_VOICE,
     CONF_FALLBACK_SAMPLE_RATE,
     CONF_FALLBACK_SUPPORTS_STREAMING,
+    CONF_TERTIARY_TTS_HOST,
+    CONF_TERTIARY_TTS_PORT,
+    CONF_TERTIARY_VOICE,
+    CONF_TERTIARY_SAMPLE_RATE,
+    CONF_TERTIARY_SUPPORTS_STREAMING,
+    CONF_BUFFER_BLOCKS,
     DEFAULT_TTS_HOST,
     DEFAULT_TTS_PORT,
     DEFAULT_LANGUAGE,
     DEFAULT_VOICE,
     DEFAULT_SAMPLE_RATE,
     DEFAULT_FALLBACK_SAMPLE_RATE,
+    DEFAULT_BUFFER_BLOCKS,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -61,7 +69,8 @@ class StreamingTtsProxyConfigFlow(ConfigFlow, domain=DOMAIN):
         """Handle the initial step."""
         errors: dict[str, str] = {}
         if user_input is not None:
-            await self.async_set_unique_id(f"{user_input[CONF_TTS_HOST]}:{user_input[CONF_TTS_PORT]}")
+            unique_id = f"{user_input[CONF_TTS_HOST]}:{user_input[CONF_TTS_PORT]}:{user_input[CONF_NAME]}"
+            await self.async_set_unique_id(unique_id)
             self._abort_if_unique_id_configured()
 
             try:
@@ -101,7 +110,7 @@ class OptionsFlowHandler(OptionsFlowWithConfigEntry):
             return self.async_create_entry(title="", data=user_input)
         
         all_voices = []
-        supported_languages: list[str] = []
+        supported_languages: list[str] =[]
         
         try:
             api = WyomingApi(self.config_entry.data[CONF_TTS_HOST], self.config_entry.data[CONF_TTS_PORT])
@@ -156,6 +165,7 @@ class OptionsFlowHandler(OptionsFlowWithConfigEntry):
             description={"suggested_value": current_config.get(CONF_SAMPLE_RATE, DEFAULT_SAMPLE_RATE)}
         )] = int
             
+        # --- Fallback Server ---
         schema_fields[vol.Optional(
             CONF_FALLBACK_TTS_HOST,
             description={"suggested_value": current_config.get(CONF_FALLBACK_TTS_HOST)}
@@ -180,5 +190,45 @@ class OptionsFlowHandler(OptionsFlowWithConfigEntry):
             CONF_FALLBACK_SUPPORTS_STREAMING,
             default=current_config.get(CONF_FALLBACK_SUPPORTS_STREAMING, False)
         )] = selector({"boolean": {}})
+            
+        # --- Tertiary Server ---
+        schema_fields[vol.Optional(
+            CONF_TERTIARY_TTS_HOST,
+            description={"suggested_value": current_config.get(CONF_TERTIARY_TTS_HOST)}
+        )] = str
+        
+        schema_fields[vol.Optional(
+            CONF_TERTIARY_TTS_PORT,
+            description={"suggested_value": current_config.get(CONF_TERTIARY_TTS_PORT)}
+        )] = int
+            
+        schema_fields[vol.Optional(
+            CONF_TERTIARY_VOICE,
+            description={"suggested_value": current_config.get(CONF_TERTIARY_VOICE)}
+        )] = str
+            
+        schema_fields[vol.Optional(
+            CONF_TERTIARY_SAMPLE_RATE,
+            description={"suggested_value": current_config.get(CONF_TERTIARY_SAMPLE_RATE, DEFAULT_FALLBACK_SAMPLE_RATE)}
+        )] = int
+
+        schema_fields[vol.Optional(
+            CONF_TERTIARY_SUPPORTS_STREAMING,
+            default=current_config.get(CONF_TERTIARY_SUPPORTS_STREAMING, False)
+        )] = selector({"boolean": {}})
+
+        # --- Audiobook Reader Buffer ---
+        schema_fields[vol.Required(
+            CONF_BUFFER_BLOCKS,
+            default=current_config.get(CONF_BUFFER_BLOCKS, DEFAULT_BUFFER_BLOCKS)
+        )] = selector({
+            "number": {
+                "min": 1,
+                "max": 10,
+                "step": 1,
+                "mode": "box",
+                "unit_of_measurement": "blocks"
+            }
+        })
             
         return self.async_show_form(step_id="init", data_schema=vol.Schema(schema_fields), errors=errors)

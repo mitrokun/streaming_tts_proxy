@@ -8,14 +8,31 @@
 
 
 - By the way, streaming response does not create a cache (long-term as a file, but temporary is still present, e.g. to be able to debug). To further reduce disk activity, I made a fix for Piper that disables the intermediate stage of creating a wav file; instead, it immediately returns a stream of raw data. Thus, all actions within a voice request are processed in memory.
-- Для русскоязычной аудитории есть ещё более [комплексная модификация](https://github.com/mitrokun/espeak-ng-data), улучшающая фонемы и позволяющая проводить расстановку ударений - автоматически, с помощью silero-stress, и в ручном режиме.
+- Для русскоязычной аудитории есть [комплексная модификация](https://github.com/mitrokun/espeak-ng-data), с контролем ударений и прочими ухищрениями. Подробности по ссылке.
 
 #### A few [diagrams](https://github.com/mitrokun/streaming_tts_proxy/blob/main/DIAGRAM.md)
 
 ---
+### Reading books
+
+Added actions for TTS synthesis with direct streaming to a media player:
+*   `streaming_tts_proxy.play` — starts initial book playback. File selection via gui is limited to the media directory; in manual mode you can specify any path.
+*   `streaming_tts_proxy.resume` — quickly resumes a previously read file (voice settings and playback position are automatically retrieved from the registry).
+*   **Sensor:** `sensor.reader_progress` tracks and displays currently active books and their progress.
+*   `streaming_tts_proxy.clear_history` — clearing sensor history.
+
+<img width="578" height="702" alt="image" src="https://github.com/user-attachments/assets/0cf3f801-33d9-498e-aa3e-b9789752e059" />
+
+
+A new "Txt Cast" object will appear in the "Media" side tab, displaying all text files uploaded to the `/media` directory (The easiest way to upload text is with the *File Editor* app/addon or Samba). If the book has a history (position, voice), that data will be used. A clean launch will use the first integration entry and its default voice.
+
+<img width="559" height="265" alt="image" src="https://github.com/user-attachments/assets/74985c13-1f01-4caa-a6dd-5ce5430ebbd7" />
+
+   
+---
 ### Fallback support
 
-* Added support for a fallback TTS server to to ensure improve reliability  during primary server outages.
+* Improved Reliability with Automatic Failover: The system now iterates through a list of configured TTS servers. It performs a fast connectivity check (64ms timeout) for each server and automatically selects the first available one to handle the request.
 * Optimized integration loading during Home Assistant restart: integrations will continue to function even if the main server is unavailable. Voice lists will be automatically restored when the main server reappears on the network and a request is made; until then, a fallback server will be utilized. Do not configure the entry when the main server is disabled.
 * In addition to local providers, cloud providers can be used through appropriate integrations, e.g. [wyoming_openai](https://github.com/roryeckel/wyoming_openai).
 
@@ -25,32 +42,4 @@ Example for PiperTTS configuration on the `192.168.1.199` host:
 
 ![image](https://github.com/user-attachments/assets/d01bcf2e-caf2-4bd7-922f-af6771959f90)
 
-```mermaid
-flowchart TD
- subgraph subGraph0["Start: Received TTS request (text, voice)"]
-        A["processor.async_process_stream"]
-  end
- subgraph subGraph1["Execution: Audio generation"]
-        J1["Call _stream_native_to_target"]
-        F1["MODE: Native streaming"]
-        J2["Call _stream_by_sentence_to_target"]
-        F2["MODE: By sentences"]
-  end
-    A --> B{"Check PRIMARY server"}
-    B -- Success --> C["Select PRIMARY server"]
-    B -- Error --> D{"Check BACKUP server"}
-    C --> E{"Does primary server support native streaming?"}
-    E -- Yes --> F1
-    E -- No --> F2
-    D -- Success --> G["Select BACKUP server"]
-    D -- Error --> H["ERROR: Both servers unavailable. Raise ConnectionRefusedError"]
-    G --> I{"Does backup server support native streaming?"}
-    I -- Yes --> F1
-    I -- No --> F2
-    F1 --> J1
-    F2 --> J2
-    J1 --> K["Deliver audio chunks as received"]
-    J2 --> K
-    K --> L["End of stream"]
-    H --> M["Request fails with error"]
-```
+
