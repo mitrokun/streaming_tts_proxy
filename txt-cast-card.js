@@ -135,15 +135,24 @@ class TxtCastCard extends HTMLElement {
     this.shadowRoot.getElementById('btn-play').addEventListener('click', () => this.handlePlay());
     this.shadowRoot.getElementById('btn-resume').addEventListener('click', () => this.handleResume());
     
+    this.shadowRoot.getElementById('player-select').addEventListener('change', (e) => {
+      localStorage.setItem('txtCast_lastPlayer', e.target.value);
+    });
+
     this.shadowRoot.getElementById('config-select').addEventListener('change', (e) => {
+      localStorage.setItem('txtCast_lastConfig', e.target.value);
       this.updateVoiceDropdown(e.target.value);
+    });
+
+    this.shadowRoot.getElementById('voice-select').addEventListener('change', (e) => {
+      localStorage.setItem('txtCast_lastVoice', e.target.value);
     });
   }
 
   async loadData() {
     const domain = this.config.domain;
 
-    // 1. Players
+    // 1. Load MP
     const players = Object.keys(this._hass.states)
       .filter(entity => entity.startsWith('media_player.'))
       .sort();
@@ -152,6 +161,12 @@ class TxtCastCard extends HTMLElement {
     playerSelect.innerHTML = players.map(p => 
       `<option value="${p}">${this._hass.states[p].attributes.friendly_name || p}</option>`
     ).join('');
+
+    // Restore MP
+    const savedPlayer = localStorage.getItem('txtCast_lastPlayer');
+    if (savedPlayer && players.includes(savedPlayer)) {
+      playerSelect.value = savedPlayer;
+    }
 
     // 2. Entries
     try {
@@ -164,8 +179,17 @@ class TxtCastCard extends HTMLElement {
           `<option value="${e.entry_id}">${e.title || 'Default Config'}</option>`
         ).join('');
         
-        // Voice
-        this.updateVoiceDropdown(ourEntries[0].entry_id);
+        // Restore config from localStorage
+        const savedConfig = localStorage.getItem('txtCast_lastConfig');
+        let activeConfigId = ourEntries[0].entry_id;
+
+        if (savedConfig && ourEntries.some(e => e.entry_id === savedConfig)) {
+          activeConfigId = savedConfig;
+          configSelect.value = activeConfigId;
+        }
+        
+        // Load voices
+        this.updateVoiceDropdown(activeConfigId);
       } else {
         configSelect.innerHTML = `<option value="">No configurations found</option>`;
       }
@@ -173,7 +197,7 @@ class TxtCastCard extends HTMLElement {
       console.error("Failed to load config entries:", e);
     }
 
-    // 3. Files
+    // 3. txt
     try {
       const fileSelect = this.shadowRoot.getElementById('file-select');
       fileSelect.innerHTML = '<option>Searching media...</option>';
@@ -217,7 +241,6 @@ class TxtCastCard extends HTMLElement {
 
   async updateVoiceDropdown(configEntryId) {
     const voiceSelect = this.shadowRoot.getElementById('voice-select');
-    const currentVal = voiceSelect.value;
     voiceSelect.disabled = true;
     
     if (!configEntryId) return;
@@ -231,7 +254,6 @@ class TxtCastCard extends HTMLElement {
 
         let voices = [];
         if (response && response.voices) {
-
           Object.values(response.voices).forEach(langVoices => {
             voices.push(...langVoices);
           });
@@ -252,8 +274,10 @@ class TxtCastCard extends HTMLElement {
     voiceSelect.innerHTML = html;
     voiceSelect.disabled = false;
 
-    if (currentVal && voices.some(v => v.voice_id === currentVal)) {
-      voiceSelect.value = currentVal;
+    // restore the voice: first from localStorage, if not, from what was selected before loading
+    const savedVoice = localStorage.getItem('txtCast_lastVoice');
+    if (savedVoice && voices.some(v => v.voice_id === savedVoice)) {
+      voiceSelect.value = savedVoice;
     }
   }
 
