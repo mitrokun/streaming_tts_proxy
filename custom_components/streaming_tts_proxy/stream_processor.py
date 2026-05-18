@@ -105,7 +105,7 @@ class StreamProcessor:
 
         for i, server_config in enumerate(self.servers):
             # Give the last (or only) server more time to respond since there's no fallback left.
-            current_timeout = 2.0 if i == total_servers - 1 else CONNECTION_TIMEOUT
+            current_timeout = 3.0 if i == total_servers - 1 else CONNECTION_TIMEOUT
             target_server_conn = None
 
             try:
