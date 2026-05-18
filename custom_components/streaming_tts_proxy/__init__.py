@@ -10,6 +10,7 @@ from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.helpers.network import get_url
 from homeassistant.helpers.storage import Store
 from homeassistant.helpers import config_validation as cv
+from homeassistant.components import websocket_api
 
 from .const import (
     DOMAIN, CONF_TTS_HOST, CONF_TTS_PORT, CONF_VOICE, CONF_SAMPLE_RATE,
@@ -29,6 +30,17 @@ from .view import TxtReaderStreamView
 _LOGGER = logging.getLogger(__name__)
 PLATFORMS: list[str] =["tts", "sensor"]
 
+@websocket_api.websocket_command({
+    vol.Required("type"): f"{DOMAIN}/get_voices",
+    vol.Required("config_entry_id"): cv.string,
+})
+@websocket_api.async_response
+async def websocket_get_voices(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict) -> None:
+    """Return voice list from .storage"""
+    store = Store(hass, 1, f"{DOMAIN}_voices_{msg['config_entry_id']}")
+    data = await store.async_load()
+    connection.send_result(msg["id"], data or {})
+
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Streaming TTS Proxy from a config entry."""
     hass.data.setdefault(DOMAIN, {})
@@ -39,6 +51,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         hass.data[DOMAIN]["store"] = store
         hass.data[DOMAIN]["sessions"] = {}
         hass.http.register_view(TxtReaderStreamView(hass))
+
+    if "ws_registered" not in hass.data[DOMAIN]:
+        websocket_api.async_register_command(hass, websocket_get_voices)
+        hass.data[DOMAIN]["ws_registered"] = True
 
     config = {**entry.data, **entry.options}
     api_client = WyomingApi(host=config[CONF_TTS_HOST], port=config[CONF_TTS_PORT])
