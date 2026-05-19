@@ -14,19 +14,21 @@ Streaming onset depends on when the source data is transmitted to the server and
 
 
 - Streaming synthesis does not use persistent file caching. However, short-term audio remains accessible in the Assist debug menu for a few minutes before being automatically purged. Piper still uses intermediate WAV files. My research on switching to in-memory audio for older  piper versions is in the piper_fix directory. Perhaps someone will find it interesting.
-- Для русскоязычной аудитории есть [комплексная модификация](https://github.com/mitrokun/espeak-ng-data), с контролем ударений и прочими ухищрениями. Подробности по ссылке.
+- Для русскоязычной аудитории есть [модификация Piper](https://github.com/mitrokun/espeak-ng-data), с контролем ударений и прочими ухищрениями. Подробности по ссылке.
 ---
 ### Fallback support
 
 * **Improved Reliability:** The system iterates through configured TTS servers, performing a fast connectivity check (64ms timeout) and selecting the first available one.
 * **Resilience during HA Restart:** The integration remains functional even if the main server is offline. Voice lists are restored automatically once the main server becomes available and a request is made. **Note:** Do not attempt to configure the entry while the main server is offline.
 * **Cloud Integration:** In addition to local providers, cloud services (e.g., [wyoming_openai](https://github.com/roryeckel/wyoming_openai)) can be used as fallbacks.
-
+> [!TIP]
+> You can find the exact voice name by going to **Media** → **Text-to-speech** and selecting your engine.
+ 
 Example for PiperTTS configuration on the `192.168.1.199` host:
 
 <img height="400" alt="image" src="https://github.com/user-attachments/assets/d01bcf2e-caf2-4bd7-922f-af6771959f90" />
 
-> 💡 You can find the exact voice name by going to **Media** → **Text-to-speech** and selecting your engine.
+
 ---
 ### TXT Cast (TTS Book Reader)
 *"Mom, can we have Audible? No, we have audiobooks at home."*
@@ -34,8 +36,12 @@ Example for PiperTTS configuration on the `192.168.1.199` host:
 These services synthesize an audio stream from your text files using the integration's config entries:
 
 
-*   `streaming_tts_proxy.play` — starts initial book playback. File selection via gui is limited to the media directory; in manual mode you can specify any path.
-*   `streaming_tts_proxy.resume` — quickly resumes a previously read file (voice settings and playback position are automatically retrieved from the registry).
+*   `streaming_tts_proxy.play` — Starts initial book playback. File selection via gui is limited to the media directory; in manual mode you can type any path.
+*   `streaming_tts_proxy.resume` — Quickly resumes the recently read file. Ideal for automations to continue reading active books.
+
+> [!NOTE]
+> * **Voice settings** are saved per file for each media player, while the **playback position** is global for the file.
+> * **Seamless switching:** Starting a new stream for a file stops the previous session. A brief delay may occur before the old device stops, but this **does not affect the saved playback position**. You can freely move between rooms without losing your place.
 
 <img height="400" alt="image" src="https://github.com/user-attachments/assets/0cf3f801-33d9-498e-aa3e-b9789752e059" />
 
