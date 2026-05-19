@@ -117,7 +117,7 @@ class TxtCastCard extends HTMLElement {
         <div class="row">
           <div class="field">
             <label>Start Block</label>
-            <input type="number" id="block-input" placeholder="0 (Start)" min="0">
+            <input type="number" id="block-input" placeholder="Optional" min="0">
           </div>
           <div class="field">
             <label>Timer (min)</label>
@@ -328,10 +328,13 @@ class TxtCastCard extends HTMLElement {
   }
 }
 
-customElements.define('txt-cast-card', TxtCastCard);
-window.customCards = window.customCards || [];
-window.customCards.push({
-  type: "txt-cast-card",
-  name: "TXT Cast Card",
-  description: "Audiobook management UI"
-});
+if (!customElements.get('txt-cast-card')) {
+  customElements.define('txt-cast-card', TxtCastCard);
+
+  window.customCards = window.customCards || [];
+  window.customCards.push({
+    type: "txt-cast-card",
+    name: "TXT Cast Card",
+    description: "UI for launching txt file synthesis"
+  });
+}
