@@ -1,34 +1,39 @@
 
 ## Alternative Wyoming TTS Client with streaming synthesis method
 
-Configure via GUI, specify the host and port of the Wyoming server. Go to the entry configuration and select a voice and Sample Rate to complete the setup.
+1. Install the component manually or via HACS (add this repository)
+2. Add "Streaming TTS Proxy" on the integrations page.
+3. Specify the host and port of the Wyoming server. Go to the entry configuration and select a voice and Sample Rate to complete the setup.
+4. (Optional) Configure  failover servers.
 
+Streaming onset depends on when the source data is transmitted to the server and may vary by task:
 
 <img height="250" alt="image" src="https://github.com/user-attachments/assets/2961ccf2-fc40-483a-a4eb-64bc4ce0bed9" />
 
+#### Some more [technical data](https://github.com/mitrokun/streaming_tts_proxy/blob/main/DIAGRAM.md)
 
-- Streaming response does not create a cache (long-term as a file, but temporary is still present, e.g. to be able to debug). Piper still uses intermediate WAV files. My research on switching to in-memory audio for older  piper versions is in the piper_fix directory. Perhaps someone will find it interesting.
+
+- Streaming synthesis does not use persistent file caching. However, short-term audio remains accessible in the Assist debug menu for a few minutes before being automatically purged. Piper still uses intermediate WAV files. My research on switching to in-memory audio for older  piper versions is in the piper_fix directory. Perhaps someone will find it interesting.
 - Для русскоязычной аудитории есть [комплексная модификация](https://github.com/mitrokun/espeak-ng-data), с контролем ударений и прочими ухищрениями. Подробности по ссылке.
-
-#### A few [diagrams](https://github.com/mitrokun/streaming_tts_proxy/blob/main/DIAGRAM.md)
-
 ---
 ### Fallback support
 
-* Improved Reliability with Automatic Failover: The system now iterates through a list of configured TTS servers. It performs a fast connectivity check (64ms timeout) for each server and automatically selects the first available one to handle the request.
-* Optimized integration loading during Home Assistant restart: integrations will continue to function even if the main server is unavailable. Voice lists will be automatically restored when the main server reappears on the network and a request is made; until then, a fallback server will be utilized. Do not configure the entry when the main server is disabled.
-* In addition to local providers, cloud providers can be used through appropriate integrations, e.g. [wyoming_openai](https://github.com/roryeckel/wyoming_openai).
-
-To set up a fallback server, you will need to know the voice's name. You can find the names of the voices by going to the `Media` tab -> `Text-to-speech`  and selecting your engine.
+* **Improved Reliability:** The system iterates through configured TTS servers, performing a fast connectivity check (64ms timeout) and selecting the first available one.
+* **Resilience during HA Restart:** The integration remains functional even if the main server is offline. Voice lists are restored automatically once the main server becomes available and a request is made. **Note:** Do not attempt to configure the entry while the main server is offline.
+* **Cloud Integration:** In addition to local providers, cloud services (e.g., [wyoming_openai](https://github.com/roryeckel/wyoming_openai)) can be used as fallbacks.
 
 Example for PiperTTS configuration on the `192.168.1.199` host:
 
 <img height="400" alt="image" src="https://github.com/user-attachments/assets/d01bcf2e-caf2-4bd7-922f-af6771959f90" />
 
+> 💡 You can find the exact voice name by going to **Media** → **Text-to-speech** and selecting your engine.
 ---
-### Reading books
+### TXT Cast (TTS Book Reader)
+*"Mom, can we have Audible? No, we have audiobooks at home."*
 
-Added actions for TTS synthesis with direct streaming to a media player:
+These services synthesize an audio stream from your text files using the integration's config entries:
+
+
 *   `streaming_tts_proxy.play` — starts initial book playback. File selection via gui is limited to the media directory; in manual mode you can specify any path.
 *   `streaming_tts_proxy.resume` — quickly resumes a previously read file (voice settings and playback position are automatically retrieved from the registry).
 
@@ -50,7 +55,9 @@ A new "Txt Cast" object will appear in the "Media" side tab, displaying all text
 
 #### Experimental card (manual installation)
 
-Save the file from repo to /config/www/txt-cast-card.js, add `/local/txt-cast-card.js?v=1` as a JS Module in Settings > Dashboards > Resources.
+1. Download txt-cast-card.js and save it to `/homeassistant/www/`.
+2. Go to Settings > Dashboards > 3 Dot > Resources.
+3. Add `/local/txt-cast-card.js?v=1` as a JavaScript Module.
 
 <img height="300" alt="image" src="https://github.com/user-attachments/assets/306e60bd-9783-4a37-b171-f537b281be50" />
 
