@@ -15,10 +15,10 @@ def get_book_chunks(file_path: str, max_len: int) -> list[str]:
             text = f.read()
             
         text = text.replace('\r\n', '\n')
-        # Не более 4 переносов строк подряд
+        # No more than 4 line breaks in a row
         text = re.sub(r'\n{5,}', '\n\n\n\n', text)
         
-        # Разрезаем, сохраняя группы \n как отдельные элементы
+        # Split, keeping groups \n as separate elements
         parts = re.split(r'(\n+)', text)
         
         chunks = []
@@ -26,25 +26,24 @@ def get_book_chunks(file_path: str, max_len: int) -> list[str]:
 
         for part in parts:
             if part.startswith('\n'):
-                # Если перенос влезает
                 if len(current_chunk) + len(part) <= max_len:
                     current_chunk += part
                 else:
-                    # Если не влезает — сохраняем старый чанк, 
-                    # а ПЕРЕНОС СТРОКИ делаем началом нового чанка
+                    # If it doesn't fit, keep the old chunk, 
+                    # and make the LINE BREAK the start of the new chunk
                     if current_chunk:
                         chunks.append(current_chunk)
                     current_chunk = part 
                 continue
 
-            content = part # Не делаем .strip() здесь, чтобы не терять пробелы форматирования
+            content = part
             
             if len(content) > max_len:
                 if current_chunk:
                     chunks.append(current_chunk)
                     current_chunk = ""
                 
-                # Дробим длинный текст по предложениям
+                # Cutting long text into sentences
                 sentences = re.split(r'(?<=[.!?…])\s+', content)
                 temp_sent = ""
                 for sent in sentences:
