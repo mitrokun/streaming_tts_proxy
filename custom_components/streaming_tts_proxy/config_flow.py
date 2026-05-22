@@ -224,7 +224,7 @@ class OptionsFlowHandler(OptionsFlowWithConfigEntry):
         )] = selector({
             "number": {
                 "min": 1,
-                "max": 10,
+                "max": 4,
                 "step": 1,
                 "mode": "box",
                 "unit_of_measurement": "blocks"
