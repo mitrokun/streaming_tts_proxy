@@ -93,18 +93,8 @@ class TxtCastCard extends HTMLElement {
       </style>
       <ha-card>
         <div class="field">
-          <label>Target Player</label>
-          <select id="player-select"><option>Loading...</option></select>
-        </div>
-
-        <div class="field">
           <label>TTS Configuration</label>
           <select id="config-select"><option>Loading...</option></select>
-        </div>
-
-        <div class="field">
-          <label>TXT File</label>
-          <select id="file-select"><option>Loading...</option></select>
         </div>
 
         <div class="field">
@@ -112,6 +102,16 @@ class TxtCastCard extends HTMLElement {
           <select id="voice-select" disabled>
             <option value="">Default Voice</option>
           </select>
+        </div>
+
+        <div class="field">
+          <label>Target Player</label>
+          <select id="player-select"><option>Loading...</option></select>
+        </div>
+
+        <div class="field">
+          <label>TXT File</label>
+          <select id="file-select"><option>Loading...</option></select>
         </div>
 
         <div class="row">
@@ -135,8 +135,11 @@ class TxtCastCard extends HTMLElement {
     this.shadowRoot.getElementById('btn-play').addEventListener('click', () => this.handlePlay());
     this.shadowRoot.getElementById('btn-resume').addEventListener('click', () => this.handleResume());
     
+    // Слушатель выбора плеера
     this.shadowRoot.getElementById('player-select').addEventListener('change', (e) => {
-      localStorage.setItem('txtCast_lastPlayer', e.target.value);
+      const playerId = e.target.value;
+      localStorage.setItem('txtCast_lastPlayer', playerId);
+      this.updateBookForPlayer(playerId); // Обновляем выбранную книгу для этого плеера
     });
 
     this.shadowRoot.getElementById('config-select').addEventListener('change', (e) => {
@@ -147,6 +150,19 @@ class TxtCastCard extends HTMLElement {
     this.shadowRoot.getElementById('voice-select').addEventListener('change', (e) => {
       localStorage.setItem('txtCast_lastVoice', e.target.value);
     });
+  }
+
+  // Метод автоматического выбора книги для конкретного плеера
+  updateBookForPlayer(playerId) {
+    if (!playerId) return;
+    const lastBook = localStorage.getItem(`txtCast_lastBook_${playerId}`);
+    const fileSelect = this.shadowRoot.getElementById('file-select');
+    if (lastBook && fileSelect) {
+      const optionExists = Array.from(fileSelect.options).some(opt => opt.value === lastBook);
+      if (optionExists) {
+        fileSelect.value = lastBook;
+      }
+    }
   }
 
   async loadData() {
@@ -207,6 +223,11 @@ class TxtCastCard extends HTMLElement {
         fileSelect.innerHTML = files.map(f => 
           `<option value="${f.media_content_id}">${f.title}</option>`
         ).join('');
+        
+        // Автоматически подгружаем книгу для текущего плеера после загрузки списка файлов
+        if (playerSelect.value) {
+          this.updateBookForPlayer(playerSelect.value);
+        }
       } else {
         fileSelect.innerHTML = '<option value="">No .txt files found</option>';
       }
@@ -293,6 +314,9 @@ class TxtCastCard extends HTMLElement {
       this.fireEvent('hass-notification', { message: 'Please select a player, config, and file.' });
       return;
     }
+
+    // Сохраняем книгу для выбранного плеера при запуске
+    localStorage.setItem(`txtCast_lastBook_${entityId}`, filePath);
 
     const serviceData = {
       config_entry: configEntry,
