@@ -67,3 +67,4 @@ A new "Txt Cast" object will appear in the "Media" side tab, displaying all text
 
 <img height="300" alt="image" src="https://github.com/user-attachments/assets/306e60bd-9783-4a37-b171-f537b281be50" />
 
+[demo](https://youtube.com/shorts/FM3JvW8PMUM?si=0fZxxHwp0xCPH7yK)
