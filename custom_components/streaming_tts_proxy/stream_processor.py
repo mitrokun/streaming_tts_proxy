@@ -322,16 +322,16 @@ class StreamProcessor:
             end_index = match.start() + 1
             sentence_part = safe_text[:end_index].replace(DECIMAL_PLACEHOLDER, ".")
             rest_part = safe_text[end_index:].replace(DECIMAL_PLACEHOLDER, ".")
-            return sentence_part.strip(), rest_part.strip()
+            return sentence_part.strip(), rest_part
             
-        max_chars = 250
+        max_chars = 350
         if len(safe_text) > max_chars:
             search_area = safe_text[: max_chars + 20]
             last_space_index = search_area.rfind(" ")
             if last_space_index > 0:
                 sentence_part = safe_text[:last_space_index].replace(DECIMAL_PLACEHOLDER, ".")
                 rest_part = safe_text[last_space_index:].replace(DECIMAL_PLACEHOLDER, ".")
-                return sentence_part.strip(), rest_part.strip()
+                return sentence_part.strip(), rest_part
                 
             sentence_part = safe_text[:max_chars].replace(DECIMAL_PLACEHOLDER, ".")
             rest_part = safe_text[max_chars:].replace(DECIMAL_PLACEHOLDER, ".")
