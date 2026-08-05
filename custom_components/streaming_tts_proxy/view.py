@@ -7,13 +7,18 @@ from aiohttp import web
 from homeassistant.components.http import HomeAssistantView
 from homeassistant.const import STATE_PLAYING, STATE_IDLE, STATE_ON
 
-from .const import DOMAIN
+from .const import (
+    DOMAIN, 
+    CONF_BUFFER_BLOCKS, 
+    DEFAULT_BUFFER_BLOCKS
+)
 from .stream_processor import create_wav_header
 
 _LOGGER = logging.getLogger(__name__)
 
 ACTIVE_STATES = (STATE_PLAYING, STATE_IDLE, STATE_ON, "buffering")
-MAX_PAUSE_TIMEOUT = 3600  # 1 час
+MAX_PAUSE_TIMEOUT = 3600  # 1 hour
+
 
 class TxtReaderStreamView(HomeAssistantView):
     """View to stream audio with precise timeline tracking and failover proxy."""
@@ -48,11 +53,15 @@ class TxtReaderStreamView(HomeAssistantView):
         session["last_accessed"] = time.time()
         
         processor = session["processor"]
-        config, file_path, chunks, store = session["config"], session["file_path"], session["chunks"], session["store"]
+        config = session["config"]
+        file_path = session["file_path"]
+        chunks = session["chunks"]
+        store = session["store"]
         player_id = session.get("player_id")
         timer_sec = session.get("timer_sec")
 
-        buffer_setting = config.get("buffer_blocks", 2)
+        # Config settings and adaptive queue limits
+        buffer_setting = config.get(CONF_BUFFER_BLOCKS, DEFAULT_BUFFER_BLOCKS)
         lead_time_limit = buffer_setting * 10.0
         initial_burst_seconds = 15.0 
         GRACE_PERIOD_SECONDS = 7.0 
@@ -61,14 +70,22 @@ class TxtReaderStreamView(HomeAssistantView):
         session.pop("start_index", None)
         
         sample_rate = config.get("sample_rate", 22050)
-        bytes_per_sec = sample_rate * 2 # 16-bit mono
+        bytes_per_sec = sample_rate * 2  # 16-bit mono (2 bytes per sample)
+
+        # Dynamic Queue Capacity: 1 for setting <= 1, capped at 2 for setting >= 2
+        queue_size = 1 if buffer_setting <= 1 else 2
+        ready_blocks = asyncio.Queue(maxsize=queue_size)
+
+        # Keep-alive silence preparation (250ms chunks with even byte alignment)
+        keep_alive_timeout = 0.250
+        silence_frames = int(sample_rate * keep_alive_timeout)
+        silence_chunk = b"\x00" * (silence_frames * 2)
 
         response = web.StreamResponse()
         response.content_type = "audio/wav"
         await response.prepare(request)
 
         stop_event = asyncio.Event()
-        ready_blocks = asyncio.Queue(maxsize=1)
 
         # Timeline and Byte Sending Variables
         bytes_sent = 0
@@ -78,8 +95,10 @@ class TxtReaderStreamView(HomeAssistantView):
         playback_timeline = []
 
         def is_player_active():
-            if not player_id: return True
-            if (time.time() - stream_start_time) < GRACE_PERIOD_SECONDS: return True
+            if not player_id:
+                return True
+            if (time.time() - stream_start_time) < GRACE_PERIOD_SECONDS:
+                return True
             p_state = self.hass.states.get(player_id)
             return p_state is not None and p_state.state in ACTIVE_STATES
 
@@ -111,12 +130,14 @@ class TxtReaderStreamView(HomeAssistantView):
             """Background synthesis: requests one block at a time from the Proxy."""
             try:
                 for i in range(start_index, len(chunks)):
-                    if stop_event.is_set() or session.get("expired"): break
+                    if stop_event.is_set() or session.get("expired"):
+                        break
                     
                     if await wait_if_paused(shift_timeline=False):
                         return
 
-                    async def single_chunk_generator(): yield chunks[i]
+                    async def single_chunk_generator():
+                        yield chunks[i]
 
                     audio_stream = processor.async_process_stream(
                         text_stream=single_chunk_generator(),
@@ -128,7 +149,8 @@ class TxtReaderStreamView(HomeAssistantView):
                     is_first = True
                     try:
                         async for chunk_bytes in audio_stream:
-                            if stop_event.is_set(): break
+                            if stop_event.is_set():
+                                break
                             if is_first and len(chunk_bytes) == 44 and chunk_bytes.startswith(b"RIFF"):
                                 is_first = False
                                 continue
@@ -141,7 +163,8 @@ class TxtReaderStreamView(HomeAssistantView):
                     if not stop_event.is_set():
                         await ready_blocks.put({'idx': i, 'data': bytes(audio_data)})
                         
-            except asyncio.CancelledError: pass
+            except asyncio.CancelledError:
+                pass
             finally: 
                 try:
                     ready_blocks.put_nowait(None)
@@ -150,11 +173,6 @@ class TxtReaderStreamView(HomeAssistantView):
 
         feeder_task = asyncio.create_task(text_feeder())
         feeder_task.add_done_callback(lambda t: t.exception() if not t.cancelled() else None)
-
-        # Keep-alive settings to prevent picky players from timing out
-        keep_alive_timeout = 0.250  # 250ms
-        silence_frames = int(sample_rate * keep_alive_timeout)
-        silence_chunk = b"\x00" * (silence_frames * 2)  # 16-bit alignment (always even)
 
         try:
             while True:
@@ -174,7 +192,7 @@ class TxtReaderStreamView(HomeAssistantView):
                 if await wait_if_paused(shift_timeline=True):
                     break
 
-                # Send WAV header immediately to satisfy the player connection
+                # 1. Send WAV header immediately to prevent player connection timeouts
                 if not header_sent:
                     await response.write(create_wav_header(sample_rate, 16, 1))
                     try:
@@ -184,7 +202,7 @@ class TxtReaderStreamView(HomeAssistantView):
                         break
                     header_sent = True
 
-                # Adaptive micro-streaming: fetch block or send silence keep-alive
+                # 2. Fetch block with adaptive keep-alive silence streaming
                 block = None
                 while block is None:
                     if stop_event.is_set() or session.get("expired"):
@@ -209,6 +227,7 @@ class TxtReaderStreamView(HomeAssistantView):
                 last_end = playback_timeline[-1][1] if playback_timeline else (bytes_sent / bytes_per_sec)
                 playback_timeline.append((block['idx'], last_end + block_dur))
 
+                # 3. Stream actual audio bytes to player
                 audio_bytes, chunk_size = block['data'], 4096
                 for i in range(0, len(audio_bytes), chunk_size):
                     
@@ -239,7 +258,8 @@ class TxtReaderStreamView(HomeAssistantView):
                     if sent_sec > (real_elapsed + limit):
                         await asyncio.sleep(min(sent_sec - (real_elapsed + limit), 0.5))
         
-        except (ConnectionResetError, asyncio.CancelledError): pass
+        except (ConnectionResetError, asyncio.CancelledError):
+            pass
 
         finally:
             stop_event.set()
@@ -250,12 +270,13 @@ class TxtReaderStreamView(HomeAssistantView):
                 except BaseException:
                     pass
 
-            # If you've reached the end, close the session.
+            # If reached near the end, mark session expired
             finish_threshold = max(len(chunks) - 2, 0)
             if current_playing_idx >= finish_threshold:
                 session["expired"] = True
 
-            # pass the final status to store.py
+            # Save final state to store
             update_progress(current_playing_idx)
         
         return response
+        

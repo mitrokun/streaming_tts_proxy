@@ -22,22 +22,29 @@
     "step": {
       "init": {
         "title": "Streaming TTS Proxy Settings",
-        "description": "Default voice parameters and fallback TTS server configuration.",
+        "description": "Default voice parameters, buffer size, and fallback TTS server configuration.",
         "data": {
           "language": "Default Language",
           "voice": "Default Voice",
-          "sample_rate": "[Optional] Primary Server Sample Rate (Hz)",
-          "fallback_tts_host": "[Optional] Fallback TTS Server Host",
-          "fallback_tts_port": "[Optional] Fallback TTS Server Port",
-          "fallback_voice": "[Optional] Fallback Server Voice",
-          "fallback_sample_rate": "[Optional] Fallback Server Sample Rate (Hz)",
-          "fallback_supports_streaming": "Native streaming mode"
+          "sample_rate": "Primary Server Sample Rate (Hz)",
+          "buffer_blocks": "Streaming buffer size",
+          "fallback_tts_host": "Fallback TTS Server Host",
+          "fallback_tts_port": "Fallback TTS Server Port",
+          "fallback_voice": "Fallback Server Voice",
+          "fallback_sample_rate": "Fallback Server Sample Rate (Hz)",
+          "fallback_supports_streaming": "Fallback native streaming mode",
+          "tertiary_tts_host": "Tertiary TTS Server Host",
+          "tertiary_tts_port": "Tertiary TTS Server Port",
+          "tertiary_voice": "Tertiary Server Voice",
+          "tertiary_sample_rate": "Tertiary Server Sample Rate (Hz)",
+          "tertiary_supports_streaming": "Tertiary native streaming mode"
         },
         "data_description": {
-          "sample_rate": "Value for the WAV header, typically 22050. A mismatched value will change the audio pitch. It's a feature, not a bug.",
-          "fallback_voice": "The voice name can be found in the Media > Text-to-Speech section after adding the server as a standard TTS integration.",
-          "fallback_sample_rate": "Similar to the primary server's sample rate parameter.",
-          "fallback_supports_streaming": "Enable this if the fallback server is running in the corresponding mode."
+          "sample_rate": "Value for the WAV header, typically 22050 Hz. Changing this value alters audio pitch and playback speed.",
+          "buffer_blocks": "Sets the number of pre-synthesized paragraphs and the amount of audio sent to the player buffer in advance. Default is 1. Increase this value if you experience pauses during playback.",
+          "fallback_voice": "The voice name can be found in Media > Text-to-Speech after adding the server as a standard TTS integration.",
+          "fallback_sample_rate": "Similar to the primary server sample rate parameter.",
+          "fallback_supports_streaming": "Enable if the fallback server supports native streaming mode."
         }
       }
     },
