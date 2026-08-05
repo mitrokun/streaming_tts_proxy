@@ -151,6 +151,11 @@ class TxtReaderStreamView(HomeAssistantView):
         feeder_task = asyncio.create_task(text_feeder())
         feeder_task.add_done_callback(lambda t: t.exception() if not t.cancelled() else None)
 
+        # Keep-alive settings to prevent picky players from timing out
+        keep_alive_timeout = 0.250  # 250ms
+        silence_frames = int(sample_rate * keep_alive_timeout)
+        silence_chunk = b"\x00" * (silence_frames * 2)  # 16-bit alignment (always even)
+
         try:
             while True:
                 if session.get("expired"):
@@ -169,7 +174,32 @@ class TxtReaderStreamView(HomeAssistantView):
                 if await wait_if_paused(shift_timeline=True):
                     break
 
-                block = await ready_blocks.get()
+                # Send WAV header immediately to satisfy the player connection
+                if not header_sent:
+                    await response.write(create_wav_header(sample_rate, 16, 1))
+                    try:
+                        await response.drain()
+                    except (ConnectionResetError, BrokenPipeError):
+                        stop_event.set()
+                        break
+                    header_sent = True
+
+                # Adaptive micro-streaming: fetch block or send silence keep-alive
+                block = None
+                while block is None:
+                    if stop_event.is_set() or session.get("expired"):
+                        break
+                    try:
+                        block = await asyncio.wait_for(ready_blocks.get(), timeout=keep_alive_timeout)
+                    except asyncio.TimeoutError:
+                        await response.write(silence_chunk)
+                        try:
+                            await response.drain()
+                        except (ConnectionResetError, BrokenPipeError):
+                            stop_event.set()
+                            break
+                        bytes_sent += len(silence_chunk)
+
                 if block is None:
                     if playback_timeline:
                         current_playing_idx = playback_timeline[-1][0] + 1
@@ -178,10 +208,6 @@ class TxtReaderStreamView(HomeAssistantView):
                 block_dur = len(block['data']) / bytes_per_sec
                 last_end = playback_timeline[-1][1] if playback_timeline else (bytes_sent / bytes_per_sec)
                 playback_timeline.append((block['idx'], last_end + block_dur))
-
-                if not header_sent:
-                    await response.write(create_wav_header(sample_rate, 16, 1))
-                    header_sent = True
 
                 audio_bytes, chunk_size = block['data'], 4096
                 for i in range(0, len(audio_bytes), chunk_size):
